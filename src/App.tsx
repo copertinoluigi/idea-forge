@@ -10,116 +10,153 @@ import { DevelopModal } from '@/components/DevelopModal';
 import { Toaster } from '@/components/ui/toaster';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
+import { summarizeConversation } from '@/lib/ai-service';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
   const { user, profile, loading } = useAuth();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [currentView, setCurrentView] = useState<'chat' | 'settings'>('chat');
+  
+  // Modals & Sidebars
   const [summarySidebarOpen, setSummarySidebarOpen] = useState(false);
   const [developModalOpen, setDevelopModalOpen] = useState(false);
+  
+  // State per la logica Multi-Stanza e Summarize
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [pendingMessageIds, setPendingMessageIds] = useState<string[]>([]);
+
   const { toast } = useToast();
 
-  const handleSummarize = async (): Promise<string> => {
-    if (!profile?.encrypted_api_key) {
-      throw new Error('Please configure your AI API key in Settings');
+  /**
+   * Logica Chirurgica per il Riassunto a Strati (Layered Context)
+   * Riceve i messaggi selezionati dalla Chat e i riassunti scelti dalla Sidebar.
+   */
+  const handleSummarize = async (selectedSummaryIds: string[]) => {
+    if (!profile?.encrypted_api_key || !activeRoomId) {
+      toast({ 
+        title: "Configurazione incompleta", 
+        description: "Assicurati di aver impostato l'API Key e di essere in una stanza.", 
+        variant: "destructive" 
+      });
+      return;
     }
 
-    const { data: messages } = await supabase
-      .from('messages')
-      .select('*, profiles(display_name)')
-      .order('created_at', { ascending: true })
-      .limit(50);
-
-    if (!messages || messages.length === 0) {
-      throw new Error('No messages to summarize');
+    if (pendingMessageIds.length === 0) {
+      toast({ title: "Nessun messaggio", description: "Seleziona almeno un messaggio dalla chat.", variant: "destructive" });
+      return;
     }
 
-    return `## Critical Analysis
+    setIsSummarizing(true);
+    try {
+      // 1. Recupera i contenuti dei messaggi selezionati
+      const { data: msgs, error: msgsError } = await supabase
+        .from('messages')
+        .select('content, user_id')
+        .in('id', pendingMessageIds);
 
-Based on the conversation, here are the key insights:
+      if (msgsError) throw msgsError;
 
-**Strengths:**
-- Clear vision and alignment among team members
-- Technical feasibility is high
-- Strong problem identification
+      // 2. Recupera i contenuti dei riassunti precedenti selezionati
+      let previousLayers: string[] = [];
+      if (selectedSummaryIds.length > 0) {
+        const { data: sums, error: sumsError } = await supabase
+          .from('summaries')
+          .select('content')
+          .in('id', selectedSummaryIds);
+        
+        if (sumsError) throw sumsError;
+        previousLayers = sums?.map(s => s.content) || [];
+      }
 
-**Challenges:**
-- Market validation needed
-- Resource allocation requires planning
-- Timeline expectations should be realistic
+      // 3. Formatta per l'AI
+      const formattedMsgs = msgs?.map(m => ({
+        user: 'Team Member',
+        content: m.content
+      })) || [];
 
-**Recommendations:**
-- Start with MVP to test core assumptions
-- Gather user feedback early
-- Iterate based on data
+      // 4. Chiama Gemini/OpenAI/Anthropic tramite il nostro servizio AI
+      const result = await summarizeConversation({
+        messages: formattedMsgs,
+        previousSummaries: previousLayers,
+        provider: profile.ai_provider as any,
+        apiKey: profile.encrypted_api_key
+      });
 
-## Market Research
+      // 5. Salva il nuovo riassunto nel database (Snapshot Archive)
+      const timestamp = new Date().toLocaleString('it-IT', { 
+        day: '2d', month: '2d', year: 'numeric', 
+        hour: '2d', minute: '2d' 
+      });
+      
+      const { error: saveError } = await supabase
+        .from('summaries')
+        .insert({
+          room_id: activeRoomId,
+          title: `Summary ${timestamp}`,
+          content: result
+        });
 
-**Target Audience:**
-The primary users appear to be teams looking for collaborative tools with AI integration.
+      if (saveError) throw saveError;
 
-**Market Size:**
-Growing market with increasing demand for AI-powered solutions.
+      toast({ 
+        title: "Analisi completata", 
+        description: "Il nuovo riassunto è stato salvato nell'archivio della stanza." 
+      });
+      
+      // Reset stati e chiusura sidebar
+      setPendingMessageIds([]);
+      setSummarySidebarOpen(false);
 
-**Competitive Landscape:**
-- Direct competitors: Traditional collaboration tools
-- Differentiator: AI-native approach with MCP integration
-
-**Go-to-Market Strategy:**
-1. Beta testing with friendly users
-2. Community building
-3. Content marketing around AI capabilities
-
-## Roadmap
-
-**Phase 1: Foundation (Weeks 1-2)**
-- Set up core infrastructure
-- Implement authentication
-- Build basic chat functionality
-
-**Phase 2: AI Integration (Weeks 3-4)**
-- Connect to AI APIs
-- Implement summarization
-- Add project generation
-
-**Phase 3: Polish (Weeks 5-6)**
-- UI/UX improvements
-- Performance optimization
-- Bug fixes and testing
-
-**Phase 4: Launch (Week 7)**
-- Soft launch to beta users
-- Gather feedback
-- Iterate and improve
-
-**Phase 5: Growth (Week 8+)**
-- Marketing push
-- Feature expansion
-- Scale infrastructure`;
+    } catch (err: any) {
+      console.error('Summarize error:', err);
+      toast({ 
+        title: "Errore durante l'analisi", 
+        description: err.message || "Errore sconosciuto", 
+        variant: "destructive" 
+      });
+    } finally {
+      setIsSummarizing(false);
+    }
   };
 
+  /**
+   * Logica per il pulsante Develop (Interfaccia verso MCP)
+   */
   const handleDevelop = async () => {
     if (!profile?.mcp_endpoint) {
-      throw new Error('Please configure your MCP endpoint in Settings');
+      toast({ 
+        title: "Configurazione mancante", 
+        description: "Inserisci l'endpoint del tuo server MCP nelle Impostazioni.", 
+        variant: "destructive" 
+      });
+      return;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 8000));
+    // Qui implementeremo la chiamata reale all'MCP Bridge in Fase 3
+    await new Promise((resolve) => setTimeout(resolve, 5000));
 
     toast({
-      title: 'Project Generated',
-      description: 'Check your email for access details',
+      title: 'Sviluppo avviato',
+      description: 'L\'agente MCP sta elaborando il progetto. Riceverai una email a breve.',
     });
   };
 
+  /**
+   * Gestione dello stato di caricamento iniziale
+   */
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950">
+      <div className="min-h-screen flex items-center justify-center bg-gray-950">
         <Loader2 className="h-8 w-8 text-violet-400 animate-spin" />
       </div>
     );
   }
 
+  /**
+   * Gestione autenticazione
+   */
   if (!user) {
     return authMode === 'login' ? (
       <Login onToggleMode={() => setAuthMode('register')} />
@@ -128,26 +165,49 @@ Growing market with increasing demand for AI-powered solutions.
     );
   }
 
+  /**
+   * Gestione setup iniziale AI/MCP
+   */
   if (!profile?.has_completed_setup) {
     return <Setup />;
   }
 
+  /**
+   * Vista Impostazioni
+   */
   if (currentView === 'settings') {
     return <Settings onBack={() => setCurrentView('chat')} />;
   }
 
+  /**
+   * Vista Principale (Chat + Sidebars)
+   */
   return (
     <>
       <Chat
+        activeRoomId={activeRoomId}
+        onRoomChange={setActiveRoomId}
         onNavigateToSettings={() => setCurrentView('settings')}
-        onSummarize={() => setSummarySidebarOpen(true)}
+        onSummarize={(selectedMessages) => {
+          // Quando l'utente conferma la selezione in Chat.tsx
+          const ids = selectedMessages.map(m => m.id);
+          setPendingMessageIds(ids);
+          setSummarySidebarOpen(true); // Apriamo la sidebar per permettere di scegliere i layer precedenti
+        }}
         onDevelop={() => setDevelopModalOpen(true)}
       />
+
       <SummarySidebar
         isOpen={summarySidebarOpen}
-        onClose={() => setSummarySidebarOpen(false)}
+        roomId={activeRoomId}
+        onClose={() => {
+          setSummarySidebarOpen(false);
+          setPendingMessageIds([]); // Reset se chiude senza generare
+        }}
         onGenerate={handleSummarize}
+        loading={isSummarizing}
       />
+
       <DevelopModal
         isOpen={developModalOpen}
         onClose={() => setDevelopModalOpen(false)}
@@ -157,6 +217,9 @@ Growing market with increasing demand for AI-powered solutions.
   );
 }
 
+/**
+ * Entry point dell'applicazione con AuthProvider
+ */
 function App() {
   return (
     <AuthProvider>
