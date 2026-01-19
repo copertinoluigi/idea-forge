@@ -5,89 +5,52 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 
 export type AIProvider = 'google' | 'openai' | 'anthropic';
 
-const SYSTEM_PROMPT = `You are an Expert Startup Coach with deep experience in product development, market analysis, and go-to-market strategies.
-
-Your role is to analyze startup conversations and provide actionable insights in three key areas:
-
-1. CRITICAL ANALYSIS: Evaluate the idea's strengths, challenges, and provide concrete recommendations
-2. MARKET RESEARCH: Assess target audience, market size, competitive landscape, and go-to-market strategy
-3. ROADMAP: Create a detailed 0-to-launch roadmap with specific phases and actionable steps
-
-Be direct, data-informed, and focus on practical execution. Challenge assumptions constructively and highlight potential risks early.`;
+const SYSTEM_PROMPT = `Sei un esperto Startup Coach e Product Manager. Il tuo compito è analizzare frammenti di conversazione e, se forniti, riassunti precedenti, per distillare l'evoluzione di un'idea.
+Struttura sempre la risposta in:
+## Analisi Critica
+## Ricerca di Mercato
+## Roadmap 0-to-launch`;
 
 interface SummarizeParams {
-  messages: Array<{
-    user: string;
-    content: string;
-  }>;
+  messages: Array<{ user: string; content: string }>;
+  previousSummaries?: string[]; // I "layer" precedenti
   provider: AIProvider;
   apiKey: string;
 }
 
 export async function summarizeConversation({
   messages,
+  previousSummaries = [],
   provider,
   apiKey,
 }: SummarizeParams): Promise<string> {
-  const conversationText = messages
-    .map((m) => `${m.user}: ${m.content}`)
-    .join('\n');
+  const conversationText = messages.map((m) => `${m.user}: ${m.content}`).join('\n');
+  const contextLayers = previousSummaries.length > 0 
+    ? `\n\nCONTESTO PRECEDENTE (Riassunti consolidati):\n${previousSummaries.join('\n---\n')}`
+    : '';
 
-  const userPrompt = `Analyze the following startup brainstorming conversation and provide insights:
-
-${conversationText}
-
-Please structure your response with these exact sections:
-## Critical Analysis
-## Market Research
-## Roadmap
-
-Be specific, actionable, and focus on helping this team succeed.`;
+  const userPrompt = `Analizza questa parte di conversazione.${contextLayers}\n\nNUOVI MESSAGGI:\n${conversationText}\n\nAggiorna l'analisi basandoti su tutto il contesto fornito.`;
 
   let model;
-
   switch (provider) {
-    case 'google': {
-      const google = createGoogleGenerativeAI({ apiKey });
-      model = google('gemini-1.5-flash');
+    case 'google':
+      model = createGoogleGenerativeAI({ apiKey })('gemini-1.5-flash');
       break;
-    }
-
-    case 'openai': {
-      const openaiProvider = createOpenAI({ apiKey });
-      model = openaiProvider('gpt-4-turbo');
+    case 'openai':
+      model = createOpenAI({ apiKey })('gpt-4-turbo');
       break;
-    }
-
-    case 'anthropic': {
-      const anthropicProvider = createAnthropic({ apiKey });
-      model = anthropicProvider('claude-3-5-sonnet-20241022');
+    case 'anthropic':
+      model = createAnthropic({ apiKey })('claude-3-5-sonnet-20241022');
       break;
-    }
-
-    default:
-      throw new Error(`Unsupported AI provider: ${provider}`);
+    default: throw new Error(`Provider non supportato: ${provider}`);
   }
 
-  try {
-    const { text } = await generateText({
-      model,
-      system: SYSTEM_PROMPT,
-      prompt: userPrompt,
-      temperature: 0.7,
-    });
+  const { text } = await generateText({
+    model,
+    system: SYSTEM_PROMPT,
+    prompt: userPrompt,
+    temperature: 0.7,
+  });
 
-    return text;
-  } catch (error) {
-    if (error instanceof Error) {
-      throw new Error(`AI generation failed: ${error.message}`);
-    }
-    throw new Error('AI generation failed with unknown error');
-  }
+  return text;
 }
-
-export const AI_PROVIDERS = [
-  { value: 'google', label: 'Google Gemini', model: 'Gemini 1.5 Flash' },
-  { value: 'openai', label: 'OpenAI', model: 'GPT-4 Turbo' },
-  { value: 'anthropic', label: 'Anthropic', model: 'Claude 3.5 Sonnet' },
-] as const;
