@@ -11,11 +11,8 @@ import {
   Code,
   Settings,
   LogOut,
-  Plus,
   Hash,
-  MessageSquare,
-  ChevronLeft,
-  CheckCircle2
+  MessageSquare
 } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
@@ -50,10 +47,9 @@ export function Chat({
   // Selection Mode
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
-  const [showSummarySidebar, setShowSummarySidebar] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { user, profile, signOut } = useAuth();
+  const { user, signOut } = useAuth(); // Rimosso 'profile' perché non usato qui
   const { toast } = useToast();
 
   const activeRoom = rooms.find(r => r.id === activeRoomId);
@@ -123,7 +119,7 @@ export function Chat({
       const { error } = await supabase.from('messages').insert({
         user_id: user.id,
         content: newMessage.trim(),
-        room_id: activeRoomId, // FIX: room_id ora presente
+        room_id: activeRoomId,
         is_system: false
       });
       if (error) throw error;
@@ -135,7 +131,6 @@ export function Chat({
     }
   };
 
-  // FIX: Funzione corretta per il pulsante Summarize
   const handleSummarizeClick = () => {
     if (!isSelectionMode) {
       setIsSelectionMode(true);
@@ -155,8 +150,8 @@ export function Chat({
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
   return (
-    <div className="h-screen flex bg-gray-950 text-white overflow-hidden font-sans">
-      {/* Sidebar Sinistra */}
+    <div className="h-screen flex bg-gray-950 text-white overflow-hidden">
+      {/* Sidebar Sinistra Navigazione */}
       <aside className="w-64 border-r border-gray-800 bg-gray-900/50 flex flex-col hidden md:flex">
         <div className="p-6">
           <div className="flex items-center gap-2 mb-8">
@@ -171,7 +166,7 @@ export function Chat({
                 onClick={() => onRoomChange(room.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all ${
                   activeRoomId === room.id 
-                  ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/20' 
+                  ? 'bg-violet-600 text-white shadow-lg' 
                   : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
                 }`}
               >
@@ -182,26 +177,31 @@ export function Chat({
           </nav>
         </div>
         <div className="mt-auto p-4 border-t border-gray-800 space-y-2">
-          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-gray-400 hover:text-white"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
-          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-red-400 hover:text-red-300"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
+          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-gray-400 hover:text-white">
+            <Settings className="h-4 w-4 mr-2" /> Settings
+          </Button>
+          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-red-400 hover:text-red-300">
+            <LogOut className="h-4 w-4 mr-2" /> Logout
+          </Button>
         </div>
       </aside>
 
       {/* Main Chat */}
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950">
         <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-6 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h2 className="font-bold text-sm tracking-tight">{activeRoom?.name || 'Seleziona stanza'}</h2>
-          </div>
+          <h2 className="font-bold text-sm tracking-tight">{activeRoom?.name || 'Seleziona stanza'}</h2>
           <div className="flex items-center gap-3">
             <Button 
               onClick={handleSummarizeClick} 
               size="sm" 
               className={`${isSelectionMode ? 'bg-green-600 animate-pulse' : 'bg-violet-600'} rounded-full font-bold`}
             >
-              <Sparkles className="mr-2 h-4 w-4" /> {isSelectionMode ? `Confirm (${selectedMessageIds.length})` : 'Summarize'}
+              <Sparkles className="mr-2 h-4 w-4" /> 
+              {isSelectionMode ? `Confirm (${selectedMessageIds.length})` : 'Summarize'}
             </Button>
-            <Button onClick={onDevelop} size="sm" className="bg-emerald-600 hover:bg-emerald-500 rounded-full font-bold px-6"><Code className="mr-2 h-4 w-4" /> Develop</Button>
+            <Button onClick={onDevelop} size="sm" className="bg-emerald-600 hover:bg-emerald-500 rounded-full font-bold px-6">
+              <Code className="mr-2 h-4 w-4" /> Develop
+            </Button>
           </div>
         </header>
 
@@ -224,11 +224,13 @@ export function Chat({
             <Textarea
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
-              placeholder={isSelectionMode ? "Seleziona i messaggi sopra..." : "Scrivi la tua idea..."}
+              placeholder={isSelectionMode ? "Modalità selezione attiva..." : "Condividi un'idea..."}
               disabled={isSelectionMode}
               className="flex-1 bg-gray-800/50 border-gray-700 text-white rounded-2xl focus:ring-violet-500/50"
             />
-            <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode} className="bg-violet-600 rounded-2xl h-[52px] px-6"><Send className="h-5 w-5" /></Button>
+            <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode} className="bg-violet-600 rounded-2xl h-[52px] px-6">
+              <Send className="h-5 w-5" />
+            </Button>
           </div>
         </form>
       </main>
