@@ -106,7 +106,6 @@ export function Register({ onToggleMode }: { onToggleMode: () => void }) {
                 required
                 className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 font-mono"
               />
-              <p className="text-xs text-gray-500">Default code: IDEAFORGE2024</p>
             </div>
             <Button
               type="submit"
