@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
-import { AI_PROVIDERS } from '@/lib/ai-service';
+import { AI_PROVIDERS, type AIProvider } from '@/lib/ai-service';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -142,16 +142,10 @@ export function Settings({ onBack }: SettingsProps) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="bg-gray-800 border-gray-700">
-                      {AI_PROVIDERS.map((provider) => (
-                        <SelectItem
-                          key={provider.value}
-                          value={provider.value}
-                          className="text-white focus:bg-gray-700 focus:text-white"
-                        >
-                          <div className="flex flex-col">
-                            <span className="font-medium">{provider.label}</span>
-                            <span className="text-xs text-gray-400">{provider.model}</span>
-                          </div>
+                      {AI_PROVIDERS.map((p) => (
+  <SelectItem key={p.value} value={p.value}>
+    {p.label}
+  </SelectItem>
                         </SelectItem>
                       ))}
                     </SelectContent>
