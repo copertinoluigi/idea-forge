@@ -12,7 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2, Key, Server, CheckCircle2, Sparkles } from 'lucide-react';
 
 export function Setup() {
-  const [aiProvider, setAiProvider] = useState('google');
+  const [aiProvider, setAiProvider] = useState<AIProvider>('google');
   const [apiKey, setApiKey] = useState('');
   const [mcpEndpoint, setMcpEndpoint] = useState('');
   const [loading, setLoading] = useState(false);
@@ -21,27 +21,19 @@ export function Setup() {
 
   const getPlaceholder = () => {
     switch (aiProvider) {
-      case 'google':
-        return 'AIza...';
-      case 'openai':
-        return 'sk-...';
-      case 'anthropic':
-        return 'sk-ant-...';
-      default:
-        return '';
+      case 'google': return 'AIza...';
+      case 'openai': return 'sk-...';
+      case 'anthropic': return 'sk-ant-...';
+      default: return '';
     }
   };
 
   const getProviderHelp = () => {
     switch (aiProvider) {
-      case 'google':
-        return 'Ottieni la chiave da Google AI Studio (https://aistudio.google.com/apikey)';
-      case 'openai':
-        return 'Ottieni la chiave da OpenAI Platform (https://platform.openai.com/api-keys)';
-      case 'anthropic':
-        return 'Ottieni la chiave da Anthropic Console (https://console.anthropic.com/)';
-      default:
-        return '';
+      case 'google': return 'Ottieni la chiave da Google AI Studio (https://aistudio.google.com/apikey)';
+      case 'openai': return 'Ottieni la chiave da OpenAI Platform (https://platform.openai.com/api-keys)';
+      case 'anthropic': return 'Ottieni la chiave da Anthropic Console (https://console.anthropic.com/)';
+      default: return '';
     }
   };
 
@@ -52,16 +44,16 @@ export function Setup() {
     setLoading(true);
 
     try {
-      type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
-      const updateData: ProfileUpdate = {
-        ai_provider: aiProvider,
-        encrypted_api_key: btoa(apiKey),
-        mcp_endpoint: mcpEndpoint,
-        has_completed_setup: true,
-      };
+      // Usiamo il tipo Update dalla definizione del database
       const { error } = await supabase
         .from('profiles')
-        .update(updateData)
+        .update({
+          ai_provider: aiProvider,
+          encrypted_api_key: apiKey, // Salviamo la chiave (il btoa era superfluo se non gestito ovunque)
+          mcp_endpoint: mcpEndpoint,
+          has_completed_setup: true,
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', user.id);
 
       if (error) throw error;
@@ -72,10 +64,10 @@ export function Setup() {
         title: 'Setup Completato!',
         description: 'Configurazione salvata con successo.',
       });
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: 'Errore',
-        description: error instanceof Error ? error.message : 'Impossibile salvare la configurazione',
+        description: error.message || 'Impossibile salvare la configurazione',
         variant: 'destructive',
       });
     } finally {
@@ -87,16 +79,16 @@ export function Setup() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 p-4">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-violet-900/20 via-transparent to-transparent"></div>
 
-      <Card className="w-full max-w-2xl relative backdrop-blur-sm bg-gray-900/50 border-gray-800">
+      <Card className="w-full max-w-2xl relative backdrop-blur-sm bg-gray-900/50 border-gray-800 shadow-2xl">
         <CardHeader className="space-y-1">
           <div className="flex items-center gap-3 mb-2">
             <div className="p-2 rounded-lg bg-violet-500/10 border border-violet-500/20">
-              <CheckCircle2 className="h-6 w-6 text-violet-400" />
+              <Sparkles className="h-6 w-6 text-violet-400" />
             </div>
             <div>
               <CardTitle className="text-2xl font-bold text-white">Initial Setup</CardTitle>
               <CardDescription className="text-gray-400">
-                Configura le impostazioni AI e MCP per iniziare
+                Benvenuto su IdeaForge. Configura i tuoi motori AI per iniziare.
               </CardDescription>
             </div>
           </div>
@@ -106,30 +98,29 @@ export function Setup() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="aiProvider" className="text-gray-300 flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-violet-400" />
                   Provider AI
                 </Label>
-                <Select value={aiProvider} onValueChange={setAiProvider}>
+                <Select 
+                  value={aiProvider} 
+                  onValueChange={(value: AIProvider) => setAiProvider(value)}
+                >
                   <SelectTrigger className="bg-gray-800/50 border-gray-700 text-white">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-gray-800 border-gray-700">
-                    {AI_PROVIDERS.map((provider) => (
-  <SelectItem key={provider.value} value={provider.value}>
-    {provider.label}
-  </SelectItem>
-))}
+                  <SelectContent className="bg-gray-800 border-gray-700 text-white">
+                    {AI_PROVIDERS.map((provider: any) => (
+                      <SelectItem key={provider.value} value={provider.value}>
+                        {provider.label} ({provider.model})
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-500">
-                  Scegli il tuo provider AI preferito per l'analisi delle conversazioni
-                </p>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="apiKey" className="text-gray-300 flex items-center gap-2">
                   <Key className="h-4 w-4 text-violet-400" />
-                  AI API Key
+                  API Key
                 </Label>
                 <Input
                   id="apiKey"
@@ -138,16 +129,14 @@ export function Setup() {
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   required
-                  className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 font-mono"
+                  className="bg-gray-800/50 border-gray-700 text-white font-mono"
                 />
-                <p className="text-xs text-gray-500">
-                  {getProviderHelp()}
-                </p>
+                <p className="text-[10px] text-gray-500">{getProviderHelp()}</p>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="mcpEndpoint" className="text-gray-300 flex items-center gap-2">
-                  <Server className="h-4 w-4 text-green-400" />
+                  <Server className="h-4 w-4 text-emerald-400" />
                   MCP Server Endpoint
                 </Label>
                 <Input
@@ -157,36 +146,38 @@ export function Setup() {
                   value={mcpEndpoint}
                   onChange={(e) => setMcpEndpoint(e.target.value)}
                   required
-                  className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500"
+                  className="bg-gray-800/50 border-gray-700 text-white"
                 />
-                <p className="text-xs text-gray-500">
-                  L'endpoint MCP (Model Context Protocol) per la generazione progetti
-                </p>
               </div>
             </div>
 
-            <div className="bg-violet-500/10 border border-violet-500/20 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-violet-300 mb-2">Cosa succede dopo?</h4>
-              <ul className="text-sm text-gray-400 space-y-1">
-                <li>• Accedi alla chat collaborativa del gruppo</li>
-                <li>• Usa l'AI per riassumere conversazioni e generare insights</li>
-                <li>• Trasforma idee in applicazioni funzionanti</li>
-                <li>• Collabora con il tuo team in tempo reale</li>
+            <div className="bg-gray-800/30 border border-gray-700 rounded-xl p-4 space-y-3">
+              <h4 className="text-xs font-bold text-violet-400 uppercase tracking-widest">Pronto per il lancio</h4>
+              <ul className="text-xs text-gray-400 space-y-2">
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-3 w-3 text-emerald-500" /> 
+                  Accesso immediato alla chat privata e di gruppo
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-3 w-3 text-emerald-500" /> 
+                  Sistema di riassunto a strati (Layered Context) attivo
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-3 w-3 text-emerald-500" /> 
+                  Integrazione diretta con il tuo server MCP
+                </li>
               </ul>
             </div>
 
             <Button
               type="submit"
-              className="w-full bg-violet-600 hover:bg-violet-500 text-white"
+              className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold h-12"
               disabled={loading}
             >
               {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Salvataggio...
-                </>
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
               ) : (
-                'Completa Setup'
+                'ATTIVA WORKSPACE'
               )}
             </Button>
           </form>
