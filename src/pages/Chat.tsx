@@ -24,9 +24,12 @@ type Message = Database['public']['Tables']['messages']['Row'] & {
 };
 
 interface ChatProps {
+  activeRoomId: string | null;
+  onRoomChange: (id: string) => void;
   onNavigateToSettings: () => void;
-  onSummarize: () => void;
+  onSummarize: (selectedMessages: Message[]) => void; // Nota: riceve l'array
   onDevelop: () => void;
+  isSelectionModeActive?: boolean;
 }
 
 export function Chat({ onNavigateToSettings, onSummarize, onDevelop }: ChatProps) {
