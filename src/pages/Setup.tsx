@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import type { Database } from '@/lib/database.types';
 import { AI_PROVIDERS, type AIProvider } from '@/lib/ai-service';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
