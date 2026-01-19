@@ -31,7 +31,7 @@ function AppContent() {
 
   /**
    * Logica Chirurgica per il Riassunto a Strati (Layered Context)
-   * Riceve i messaggi selezionati dalla Chat e i riassunti scelti dalla Sidebar.
+   * Riceve i riassunti scelti dalla Sidebar.
    */
   const handleSummarize = async (selectedSummaryIds: string[]) => {
     if (!profile?.encrypted_api_key || !activeRoomId) {
@@ -85,9 +85,10 @@ function AppContent() {
       });
 
       // 5. Salva il nuovo riassunto nel database (Snapshot Archive)
+      // FIX: Cambiato '2d' in '2-digit' per compatibilità TypeScript
       const timestamp = new Date().toLocaleString('it-IT', { 
-        day: '2d', month: '2d', year: 'numeric', 
-        hour: '2d', minute: '2d' 
+        day: '2-digit', month: '2-digit', year: 'numeric', 
+        hour: '2-digit', minute: '2-digit' 
       });
       
       const { error: saveError } = await supabase
@@ -134,7 +135,6 @@ function AppContent() {
       return;
     }
 
-    // Qui implementeremo la chiamata reale all'MCP Bridge in Fase 3
     await new Promise((resolve) => setTimeout(resolve, 5000));
 
     toast({
@@ -143,9 +143,6 @@ function AppContent() {
     });
   };
 
-  /**
-   * Gestione dello stato di caricamento iniziale
-   */
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-950">
@@ -154,9 +151,6 @@ function AppContent() {
     );
   }
 
-  /**
-   * Gestione autenticazione
-   */
   if (!user) {
     return authMode === 'login' ? (
       <Login onToggleMode={() => setAuthMode('register')} />
@@ -165,34 +159,24 @@ function AppContent() {
     );
   }
 
-  /**
-   * Gestione setup iniziale AI/MCP
-   */
   if (!profile?.has_completed_setup) {
     return <Setup />;
   }
 
-  /**
-   * Vista Impostazioni
-   */
   if (currentView === 'settings') {
     return <Settings onBack={() => setCurrentView('chat')} />;
   }
 
-  /**
-   * Vista Principale (Chat + Sidebars)
-   */
   return (
     <>
       <Chat
         activeRoomId={activeRoomId}
         onRoomChange={setActiveRoomId}
         onNavigateToSettings={() => setCurrentView('settings')}
-        onSummarize={(selectedMessages) => {
-          // Quando l'utente conferma la selezione in Chat.tsx
-          const ids = selectedMessages.map(m => m.id);
+        onSummarize={(selectedMessages: any[]) => {
+          const ids = selectedMessages.map((m: any) => m.id);
           setPendingMessageIds(ids);
-          setSummarySidebarOpen(true); // Apriamo la sidebar per permettere di scegliere i layer precedenti
+          setSummarySidebarOpen(true);
         }}
         onDevelop={() => setDevelopModalOpen(true)}
       />
@@ -202,7 +186,7 @@ function AppContent() {
         roomId={activeRoomId}
         onClose={() => {
           setSummarySidebarOpen(false);
-          setPendingMessageIds([]); // Reset se chiude senza generare
+          setPendingMessageIds([]);
         }}
         onGenerate={handleSummarize}
         loading={isSummarizing}
@@ -217,9 +201,6 @@ function AppContent() {
   );
 }
 
-/**
- * Entry point dell'applicazione con AuthProvider
- */
 function App() {
   return (
     <AuthProvider>
