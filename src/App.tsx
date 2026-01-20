@@ -18,12 +18,17 @@ function AppContent() {
   const { user, profile, loading } = useAuth();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [currentView, setCurrentView] = useState<'chat' | 'settings' | 'admin'>('chat');
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [summarySidebarOpen, setSummarySidebarOpen] = useState(false);
   const [developModalOpen, setDevelopModalOpen] = useState(false);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [pendingMessages, setPendingMessages] = useState<any[]>([]);
   const { toast } = useToast();
+
+  const handleRoomChange = (id: string) => {
+    setActiveRoomId(id);
+    // Persistenza opzionale lato DB già gestita in Chat.tsx
+  };
 
   const handleSummarize = async (selectedSummaryIds: string[]) => {
     if (!activeRoomId || pendingMessages.length === 0) return;
@@ -31,6 +36,7 @@ function AppContent() {
     try {
       const { data: room } = await supabase.from('rooms').select('*').eq('id', activeRoomId).single();
       const { data: sums } = await supabase.from('summaries').select('content').in('id', selectedSummaryIds);
+      
       const result = await summarizeConversation({
         messages: pendingMessages.map(m => ({ user: 'Member', content: m.content })),
         previousSummaries: sums?.map(s => s.content) || [],
@@ -38,38 +44,83 @@ function AppContent() {
         apiKey: room?.encrypted_api_key || profile?.encrypted_api_key || ''
       });
 
-      const timestamp = new Date().toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
-      await supabase.from('summaries').insert({ room_id: activeRoomId, title: `Summary ${timestamp}`, content: result });
-      toast({ title: "Analisi salvata" });
+      const timestamp = new Date().toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      await supabase.from('summaries').insert({ room_id: activeRoomId, title: `Analisi ${timestamp}`, content: result });
+      toast({ title: "Analisi completata" });
       setSummarySidebarOpen(false);
     } catch (err: any) {
-      toast({ title: "Errore AI", description: err.message, variant: "destructive" });
-    } finally { setIsSummarizing(false); setPendingMessages([]); }
+      toast({ title: "Errore", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSummarizing(false);
+      setPendingMessages([]);
+    }
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-gray-950"><div className="text-center space-y-4"><Loader2 className="animate-spin text-violet-500 h-10 w-10 mx-auto" /><p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em]">IdeaForge Sincronizzazione...</p></div></div>;
-  if (!user) return authMode === 'login' ? <Login onToggleMode={() => setAuthMode('register')} /> : <Register onToggleMode={() => setAuthMode('login')} />;
-  if (!profile?.has_completed_setup) return <Setup />;
+  // --- LOGICA DI RENDERING FAIL-SAFE ---
   
-  if (currentView === 'settings') return <Settings onBack={() => setCurrentView('chat')} />;
-  if (currentView === 'admin') return <AdminDashboard onBack={() => setCurrentView('chat')} />;
+  // 1. Se l'Auth è ancora in caricamento totale, mostra il loader
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-950">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-10 w-10 text-violet-500 animate-spin mx-auto" />
+          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em] animate-pulse">IdeaForge Booting...</p>
+        </div>
+      </div>
+    );
+  }
 
+  // 2. Se non c'è l'utente, vai a Login/Register
+  if (!user) {
+    return authMode === 'login' ? (
+      <Login onToggleMode={() => setAuthMode('register')} />
+    ) : (
+      <Register onToggleMode={() => setAuthMode('login')} />
+    );
+  }
+
+  // 3. Se l'utente c'è ma il profilo non è ancora arrivato (latenza DB), attendi brevemente
+  if (!profile) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-950">
+        <Loader2 className="h-8 w-8 text-violet-500 animate-spin" />
+      </div>
+    );
+  }
+
+  // 4. Se il profilo c'è ma il setup non è fatto
+  if (profile.has_completed_setup === false) {
+    return <Setup />;
+  }
+
+  // 5. Router Viste Speciali
+  if (currentView === 'settings') return <Settings onBack={() => setCurrentView('chat')} />;
+  if (currentView === 'admin' && (user.email === 'info@luigicopertino.it' || user.email === 'unixgigi@gmail.com')) {
+    return <AdminDashboard onBack={() => setCurrentView('chat')} />;
+  }
+
+  // 6. Vista Chat Principale
   return (
     <>
       <Chat
         activeRoomId={activeRoomId}
-        onRoomChange={setActiveRoomId}
+        onRoomChange={handleRoomChange}
         onNavigateToSettings={() => setCurrentView('settings')}
         onNavigateToAdmin={() => setCurrentView('admin')}
         onSummarize={(msgs) => { setPendingMessages(msgs); setSummarySidebarOpen(true); }}
         onDevelop={() => setDevelopModalOpen(true)}
       />
-      <SummarySidebar isOpen={summarySidebarOpen} roomId={activeRoomId} onClose={() => setSummarySidebarOpen(false)} onGenerate={handleSummarize} loading={isSummarizing} />
-      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => { toast({title: "Richiesta inviata"}); setDevelopModalOpen(false); }} />
+      <SummarySidebar isOpen={summarySidebarOpen} roomId={activeRoomId} onClose={() => { setSummarySidebarOpen(false); setPendingMessages([]); }} onGenerate={handleSummarize} loading={isSummarizing} />
+      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => {}} />
       <Toaster />
     </>
   );
 }
 
-function App() { return <AuthProvider><AppContent /></AuthProvider>; }
-export default App;
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}
