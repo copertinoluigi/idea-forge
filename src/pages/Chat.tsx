@@ -7,7 +7,7 @@ import { ChatMessage } from '@/components/ChatMessage';
 import { useToast } from '@/hooks/use-toast';
 import { AddRoomModal } from '@/components/AddRoomModal';
 import { chatWithAI } from '@/lib/ai-service';
-import { Send, Sparkles, Code, Settings, LogOut, Plus, Hash, MessageSquare, ShieldCheck, Loader2 } from 'lucide-react';
+import { Send, Sparkles, Code, Settings, LogOut, Plus, Hash, MessageSquare, ShieldCheck, Loader2, Copy } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
 type Message = Database['public']['Tables']['messages']['Row'] & { profiles: { display_name: string } | null };
@@ -32,21 +32,26 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [isAddRoomOpen, setIsAddRoomOpen] = useState(false);
   
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, refreshProfile } = useAuth();
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomIdRef = useRef(activeRoomId);
 
   useEffect(() => { activeRoomIdRef.current = activeRoomId; }, [activeRoomId]);
 
-  useEffect(() => { if (user) loadRooms(); }, [user]);
+  // 1. Caricamento Iniziale Stanze e Sincronizzazione con Profilo
+  useEffect(() => {
+    if (user) loadRoomsAndSync();
+  }, [user]);
 
-  // Caricamento messaggi e Realtime
+  // 2. Caricamento Messaggi (Solo quando l'ID stanza è confermato)
   useEffect(() => {
     if (!activeRoomId) return;
+
+    setMessages([]); // Svuota immediatamente per evitare ghosting
     loadMessages(activeRoomId);
 
-    const channel = supabase.channel(`room-${activeRoomId}`)
+    const channel = supabase.channel(`room-fixed-${activeRoomId}`)
       .on('postgres_changes', { 
         event: 'INSERT', 
         schema: 'public', 
@@ -56,20 +61,21 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         if (payload.new.room_id !== activeRoomIdRef.current) return;
         const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
         setMessages(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, { ...payload.new, profiles: p } as Message]));
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+        setTimeout(scrollToBottom, 50);
       }).subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [activeRoomId]);
 
-  const loadRooms = async () => {
+  const loadRoomsAndSync = async () => {
     if (!user) return;
     setRoomsLoading(true);
     try {
       const { data: memberships } = await supabase.from('room_members').select('rooms (*)').eq('user_email', user.email);
       let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
+      
+      // Se non c'è una console privata, la creiamo
       let privateConsole = memberRooms.find(r => r.is_private);
-
       if (!privateConsole) {
         const { data: newRoom } = await supabase.from('rooms').insert({
           name: 'La mia Console', is_private: true, created_by: user.id, ai_provider: 'google-flash'
@@ -80,15 +86,35 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           privateConsole = newRoom;
         }
       }
+
       setRooms(memberRooms);
-      if (!activeRoomId && privateConsole) onRoomChange(privateConsole.id);
-    } catch (e) { console.error(e); } finally { setRoomsLoading(false); }
+
+      // Sincronizziamo la stanza attiva dal Database invece del LocalStorage
+      if (profile?.last_room_id && memberRooms.some(r => r.id === profile.last_room_id)) {
+        onRoomChange(profile.last_room_id);
+      } else if (privateConsole) {
+        onRoomChange(privateConsole.id);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setRoomsLoading(false);
+    }
   };
 
   const loadMessages = async (id: string) => {
     const { data } = await supabase.from('messages').select('*, profiles(display_name)').eq('room_id', id).order('created_at', { ascending: true });
-    setMessages(data as Message[] || []);
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    if (data) setMessages(data as Message[]);
+    setTimeout(scrollToBottom, 100);
+  };
+
+  const handleRoomSwitch = async (id: string) => {
+    onRoomChange(id);
+    // Salviamo la preferenza sul DB
+    if (user) {
+      await supabase.from('profiles').update({ last_room_id: id }).eq('id', user.id);
+      await refreshProfile();
+    }
   };
 
   const handleSend = async (e: React.FormEvent) => {
@@ -105,18 +131,33 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         const reply = await chatWithAI({ messages: [{content}], provider: activeR.ai_provider, apiKey: activeR.encrypted_api_key || profile?.encrypted_api_key || '' });
         await supabase.from('messages').insert({ user_id: user.id, content: reply, room_id: currentRoomId, is_system: true });
       }
-    } catch (err: any) { toast({ title: "Errore", description: err.message, variant: "destructive" }); } finally { setLoading(false); }
+    } catch (err: any) {
+      toast({ title: "Errore", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const isAdmin = user?.email === 'info@luigicopertino.it' || user?.email === 'unixgigi@gmail.com';
 
   return (
     <div className="h-screen flex bg-gray-950 text-white overflow-hidden font-sans text-left">
       <aside className="w-64 border-r border-gray-800 bg-gray-900/50 flex flex-col hidden md:flex">
         <div className="p-6">
-          <div className="flex items-center gap-2 mb-8 justify-center"><Sparkles className="text-violet-400" /> <h1 className="font-black italic uppercase">IdeaForge</h1></div>
-          <div className="flex items-center justify-between mb-4 px-2"><p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest font-black">Workspace</p><Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:text-violet-400"><Plus className="h-4 w-4" /></Button></div>
+          <div className="flex items-center gap-2 mb-8 justify-center">
+            <Sparkles className="h-6 w-6 text-violet-400" />
+            <h1 className="font-black text-xl italic uppercase tracking-widest text-white">IdeaForge</h1>
+          </div>
+          <div className="flex items-center justify-between mb-4 px-2">
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</p>
+            <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:text-violet-400"><Plus className="h-4 w-4" /></Button>
+          </div>
           <nav className="space-y-1 overflow-y-auto">
-            {roomsLoading ? <div className="p-4 text-center"><Loader2 className="animate-spin inline h-4 w-4" /></div> : rooms.map(room => (
-              <button key={room.id} onClick={() => onRoomChange(room.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
+            {roomsLoading ? (
+              <div className="flex justify-center p-4"><Loader2 className="animate-spin h-4 w-4 text-gray-700" /></div>
+            ) : rooms.map(room => (
+              <button key={room.id} onClick={() => handleRoomSwitch(room.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all duration-200 ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
                 {room.is_private ? <MessageSquare className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
                 <span className="truncate font-bold">{room.name}</span>
               </button>
@@ -124,35 +165,41 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </nav>
         </div>
         <div className="mt-auto p-4 border-t border-gray-800 space-y-1">
-          { (user?.email === 'info@luigicopertino.it' || user?.email === 'unixgigi@gmail.com') && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
-          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 font-bold hover:bg-gray-800"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
-          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
+          {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
+          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 font-bold hover:bg-gray-800 hover:text-white"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
+          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
         </div>
       </aside>
+
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950">
         <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-6 flex items-center justify-between">
-          <div className="flex flex-col text-left"><h2 className="font-bold text-sm text-white uppercase italic">{rooms.find(r => r.id === activeRoomId)?.name || 'Caricamento...'}</h2><span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{rooms.find(r => r.id === activeRoomId)?.ai_provider} active</span></div>
+          <div className="flex flex-col">
+            <h2 className="font-bold text-sm text-white uppercase tracking-tighter italic">{rooms.find(r => r.id === activeRoomId)?.name || 'Caricamento...'}</h2>
+            <span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{rooms.find(r => r.id === activeRoomId)?.ai_provider || 'system'} engine active</span>
+          </div>
           <div className="flex items-center gap-3">
-            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600'} text-white rounded-full font-black px-5 transition-all text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Conferma (${selectedMessageIds.length})` : 'Summarize'}</Button>
-            <Button onClick={onDevelop} disabled={!rooms.find(r => r.id === activeRoomId)?.mcp_endpoint} size="sm" className="bg-emerald-600 text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest"><Code className="mr-2 h-3.5 w-3.5" /> Develop</Button>
+            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600 shadow-lg shadow-violet-900/40'} text-white rounded-full font-black px-5 transition-all text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Conferma (${selectedMessageIds.length})` : 'Summarize'}</Button>
+            <Button onClick={onDevelop} disabled={!rooms.find(r => r.id === activeRoomId)?.mcp_endpoint} size="sm" className={`${rooms.find(r => r.id === activeRoomId)?.mcp_endpoint ? 'bg-emerald-600' : 'bg-gray-800 text-gray-500 opacity-50'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}><Code className="mr-2 h-3.5 w-3.5" /> Develop</Button>
           </div>
         </header>
+
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {messages.map((m) => (
             <ChatMessage key={m.id} message={m} isOwn={m.user_id === user?.id} isSelectionMode={isSelectionMode} isSelected={selectedMessageIds.includes(m.id)} onSelect={(id) => setSelectedMessageIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])} />
           ))}
           <div ref={messagesEndRef} />
         </div>
+
         <form onSubmit={handleSend} className="p-6 bg-gray-900/30 border-t border-gray-800">
           <div className="max-w-4xl mx-auto flex gap-4">
-            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={activeRoomId ? "Scrivi alla tua AI o al gruppo..." : "Seleziona una stanza..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl min-h-[56px] resize-none py-4" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
+            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={activeRoomId ? "Scrivi alla tua AI o al gruppo..." : "Seleziona una stanza..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
             <Button type="submit" disabled={loading || !newMessage.trim() || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-2xl h-[56px] px-6 shadow-xl shadow-violet-900/30">
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
           </div>
         </form>
       </main>
-      <AddRoomModal isOpen={isAddRoomOpen} onClose={() => setIsAddRoomOpen(false)} onSuccess={() => { loadRooms(); setIsAddRoomOpen(false); }} />
+      <AddRoomModal isOpen={isAddRoomOpen} onClose={() => setIsAddRoomOpen(false)} onSuccess={() => { loadRoomsAndSync(); setIsAddRoomOpen(false); }} />
     </div>
   );
 }
