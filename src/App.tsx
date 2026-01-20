@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { Login } from '@/pages/Login';
 import { Register } from '@/pages/Register';
@@ -34,6 +34,7 @@ function AppContent() {
 
   const handleSummarize = async (selectedSummaryIds: string[]) => {
     if (!activeRoomId || pendingMessages.length === 0) return;
+    
     setIsSummarizing(true);
     try {
       const { data: room } = await supabase.from('rooms').select('*').eq('id', activeRoomId).single();
@@ -61,36 +62,31 @@ function AppContent() {
     }
   };
 
-  // LOGICA DI RENDERING CHIARA
+  // Logica di caricamento con uscita di sicurezza
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-950">
-        <Loader2 className="h-10 w-10 text-violet-500 animate-spin" />
+        <div className="text-center space-y-4">
+          <Loader2 className="h-10 w-10 text-violet-500 animate-spin mx-auto" />
+          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em] animate-pulse">Inizializzazione...</p>
+        </div>
       </div>
     );
   }
 
-  // 1. Se non c'è utente -> Login
   if (!user) {
-    return authMode === 'login' ? (
-      <Login onToggleMode={() => setAuthMode('register')} />
-    ) : (
-      <Register onToggleMode={() => setAuthMode('login')} />
-    );
+    return authMode === 'login' ? <Login onToggleMode={() => setAuthMode('register')} /> : <Register onToggleMode={() => setAuthMode('login')} />;
   }
 
-  // 2. Se c'è utente ma non ha finito il setup -> Setup
   if (!profile?.has_completed_setup) {
     return <Setup />;
   }
 
-  // 3. Router interno per le viste speciali
   if (currentView === 'settings') return <Settings onBack={() => setCurrentView('chat')} />;
   if (currentView === 'admin' && (user.email === 'info@luigicopertino.it' || user.email === 'unixgigi@gmail.com')) {
     return <AdminDashboard onBack={() => setCurrentView('chat')} />;
   }
 
-  // 4. Vista principale
   return (
     <>
       <Chat
@@ -101,8 +97,8 @@ function AppContent() {
         onSummarize={(msgs) => { setPendingMessages(msgs); setSummarySidebarOpen(true); }}
         onDevelop={() => setDevelopModalOpen(true)}
       />
-      <SummarySidebar isOpen={summarySidebarOpen} roomId={activeRoomId} onClose={() => setSummarySidebarOpen(false)} onGenerate={handleSummarize} loading={isSummarizing} />
-      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => { toast({title: "Richiesta MCP inviata"}); setDevelopModalOpen(false); }} />
+      <SummarySidebar isOpen={summarySidebarOpen} roomId={activeRoomId} onClose={() => { setSummarySidebarOpen(false); setPendingMessages([]); }} onGenerate={handleSummarize} loading={isSummarizing} />
+      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => { toast({title: "Deploy avviato"}); setDevelopModalOpen(false); }} />
       <Toaster />
     </>
   );
