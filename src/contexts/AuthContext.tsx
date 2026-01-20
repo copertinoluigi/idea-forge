@@ -28,8 +28,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .select('*')
       .eq('id', userId)
       .maybeSingle();
-
     setProfile(data);
+    return data;
   };
 
   const refreshProfile = async () => {
@@ -39,23 +39,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    // Gestione sessione iniziale
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
       if (session?.user) {
-        loadProfile(session.user.id);
+        setUser(session.user);
+        loadProfile(session.user.id).then(() => setLoading(false));
+      } else {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      (async () => {
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await loadProfile(session.user.id);
-        } else {
-          setProfile(null);
-        }
-      })();
+    // Ascolto cambiamenti auth
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        await loadProfile(session.user.id);
+      } else {
+        setUser(null);
+        setProfile(null);
+      }
+      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -74,45 +77,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq('is_used', false)
       .maybeSingle();
 
-    if (!invite) {
-      throw new Error('Invalid or already used invite code');
-    }
+    if (!invite) throw new Error('Codice invito non valido o già usato');
 
-    const { data: authData, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-
+    const { data: authData, error: signUpError } = await supabase.auth.signUp({ email, password });
     if (signUpError) throw signUpError;
-    if (!authData.user) throw new Error('Failed to create user');
+    if (!authData.user) throw new Error('Errore creazione utente');
 
-    type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
-    const profileData: ProfileInsert = {
+    const { error: profileError } = await supabase.from('profiles').insert({
       id: authData.user.id,
       email,
       display_name: displayName,
-    };
-    const { error: profileError } = await supabase.from('profiles').insert(profileData);
-
+    });
     if (profileError) throw profileError;
 
-    type InviteUpdate = Database['public']['Tables']['invites']['Update'];
-    const inviteUpdate: InviteUpdate = {
+    await supabase.from('invites').update({
       is_used: true,
       used_by: authData.user.id,
       used_at: new Date().toISOString(),
-    };
-    const { error: inviteError } = await supabase
-      .from('invites')
-      .update(inviteUpdate)
-      .eq('id', invite.id);
-
-    if (inviteError) throw inviteError;
+    }).eq('id', invite.id);
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    await supabase.auth.signOut();
+    setUser(null);
+    setProfile(null);
   };
 
   return (
@@ -124,8 +112,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (context === undefined) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 }
