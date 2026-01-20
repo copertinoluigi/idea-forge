@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ChatMessage } from '@/components/ChatMessage';
 import { useToast } from '@/hooks/use-toast';
 import { AddRoomModal } from '@/components/AddRoomModal';
-import { chatWithAI } from '@/lib/ai-service'; // Importata la nuova funzione chat
+import { chatWithAI } from '@/lib/ai-service';
 import { Send, Sparkles, Code, Settings, LogOut, Plus, Hash, MessageSquare, ShieldCheck, Loader2 } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
@@ -36,23 +36,20 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoom = rooms.find(r => r.id === activeRoomId);
 
-  // 1. Carica Stanze e ripristina l'ultima attiva dal localStorage
-  useEffect(() => {
-    if (user) loadRooms();
-  }, [user]);
+  useEffect(() => { if (user) loadRooms(); }, [user]);
 
+  // Gestione Persistenza Stanza Attiva
   useEffect(() => {
-    const savedRoomId = localStorage.getItem('lastActiveRoomId');
+    const savedId = localStorage.getItem('lastActiveRoomId');
     if (rooms.length > 0) {
-      if (savedRoomId && rooms.some(r => r.id === savedRoomId)) {
-        onRoomChange(savedRoomId);
+      if (savedId && rooms.some(r => r.id === savedId)) {
+        onRoomChange(savedId);
       } else if (!activeRoomId) {
         onRoomChange(rooms[0].id);
       }
     }
   }, [rooms]);
 
-  // 2. Persistenza della stanza attiva
   useEffect(() => {
     if (activeRoomId) {
       localStorage.setItem('lastActiveRoomId', activeRoomId);
@@ -74,10 +71,10 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const loadRooms = async () => {
     if (!user) return;
     const { data: memberRooms } = await supabase.from('rooms').select('*, room_members!inner(user_email)').eq('room_members.user_email', user.email);
+    
     if (memberRooms && memberRooms.length > 0) {
       setRooms(memberRooms);
     } else {
-      // Auto-creazione Console se non ci sono stanze
       const { data: newRoom } = await supabase.from('rooms').insert({
         name: 'La mia Console', is_private: true, created_by: user.id, ai_provider: 'google-flash'
       }).select().single();
@@ -105,14 +102,17 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     setLoading(true);
 
     try {
-      // Salva messaggio utente
+      // 1. Salva messaggio umano
       const { error } = await supabase.from('messages').insert({ user_id: user.id, content: content, room_id: activeRoomId });
       if (error) throw error;
 
-      // Se è la Console Privata, trigger Chat AI (colloquiale)
+      // 2. TRIGGER AI CONDIZIONALE: Solo se la stanza è PRIVATA
       if (activeRoom?.is_private) {
+        const history = messages.map(m => ({ role: m.is_system ? 'assistant' : 'user', content: m.content }));
+        history.push({ role: 'user', content });
+
         const reply = await chatWithAI({
-          messages: [{ content }],
+          messages: history,
           provider: activeRoom.ai_provider,
           apiKey: activeRoom.encrypted_api_key || profile?.encrypted_api_key || ''
         });
@@ -121,6 +121,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           user_id: user.id, content: reply, room_id: activeRoomId, is_system: true
         });
       }
+      // Se NON è privata, il codice finisce qui. L'AI resta "dormiente".
     } catch (err: any) {
       toast({ title: "Errore", description: err.message, variant: "destructive" });
     } finally {
@@ -133,7 +134,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   return (
     <div className="h-screen flex bg-gray-950 text-white overflow-hidden font-sans">
-      {/* Sidebar Sinistra con FIX HOVER */}
+      {/* Sidebar Sinistra con FIX COLORI/HOVER */}
       <aside className="w-64 border-r border-gray-800 bg-gray-900/50 flex flex-col hidden md:flex">
         <div className="p-6">
           <div className="flex items-center gap-2 mb-8 justify-center">
@@ -142,48 +143,33 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </div>
           <div className="flex items-center justify-between mb-4 px-2">
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</p>
-            <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:bg-gray-800 hover:text-violet-400 transition-colors"><Plus className="h-4 w-4" /></Button>
+            <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:bg-gray-800 hover:text-violet-400"><Plus className="h-4 w-4" /></Button>
           </div>
           <nav className="space-y-1 overflow-y-auto">
             {rooms.map(room => (
-              <button 
-                key={room.id} 
-                onClick={() => onRoomChange(room.id)} 
+              <button key={room.id} onClick={() => onRoomChange(room.id)} 
                 className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all duration-200 ${
-                  activeRoomId === room.id 
-                  ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/30' 
-                  : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
-                }`}
-              >
+                  activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
+                }`}>
                 {room.is_private ? <MessageSquare className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
-                <span className="truncate font-bold">{room.name}</span>
+                <span className="truncate font-bold tracking-tight">{room.name}</span>
               </button>
             ))}
           </nav>
         </div>
         
-        {/* Navigazione Basso con FIX HOVER */}
-        <div className="mt-auto p-4 border-t border-gray-800 space-y-1 bg-gray-900/20">
-          {isAdmin && (
-            <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300">
-              <ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata
-            </Button>
-          )}
-          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-400 font-bold hover:bg-gray-800 hover:text-white">
-            <Settings className="h-4 w-4 mr-2" /> Settings
-          </Button>
-          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300">
-            <LogOut className="h-4 w-4 mr-2" /> Logout
-          </Button>
+        <div className="mt-auto p-4 border-t border-gray-800 space-y-1 bg-gray-900/10">
+          {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
+          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 font-bold hover:bg-gray-800 hover:text-white transition-colors"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
+          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300 transition-colors"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
         </div>
       </aside>
 
-      {/* Main Chat Area */}
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950">
         <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-6 flex items-center justify-between">
           <div className="flex flex-col">
-            <h2 className="font-bold text-sm text-white uppercase tracking-tighter italic">{activeRoom?.name || 'Inizializzazione...'}</h2>
-            <span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{activeRoom?.ai_provider} active</span>
+            <h2 className="font-bold text-sm text-white tracking-tight uppercase italic">{activeRoom?.name || 'Inizializzazione...'}</h2>
+            <span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{activeRoom?.ai_provider} brain active</span>
           </div>
           <div className="flex items-center gap-3">
             <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600 shadow-lg shadow-violet-900/40'} text-white rounded-full font-black px-5 transition-all text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Conferma (${selectedMessageIds.length})` : 'Summarize'}</Button>
@@ -200,7 +186,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
         <form onSubmit={handleSend} className="p-6 bg-gray-900/30 border-t border-gray-800">
           <div className="max-w-4xl mx-auto flex gap-4">
-            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : "Scrivi alla tua AI o al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
+            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : "Chatta con l'AI o scrivi al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
             <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-2xl h-[56px] px-6 shadow-xl shadow-violet-900/30 transition-transform active:scale-95">
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
