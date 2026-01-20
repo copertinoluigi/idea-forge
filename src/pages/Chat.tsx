@@ -7,7 +7,7 @@ import { ChatMessage } from '@/components/ChatMessage';
 import { useToast } from '@/hooks/use-toast';
 import { AddRoomModal } from '@/components/AddRoomModal';
 import { chatWithAI } from '@/lib/ai-service';
-import { Send, Sparkles, Code, Settings, LogOut, Plus, Hash, MessageSquare, ShieldCheck, Loader2, Copy } from 'lucide-react';
+import { Send, Sparkles, Code, Settings, LogOut, Plus, Hash, MessageSquare, ShieldCheck, Loader2 } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
 type Message = Database['public']['Tables']['messages']['Row'] & { profiles: { display_name: string } | null };
@@ -37,7 +37,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoom = rooms.find(r => r.id === activeRoomId);
 
-  // Caricamento iniziale
+  // Caricamento iniziale stanze
   useEffect(() => {
     if (user) {
       loadRooms();
@@ -71,7 +71,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     setRoomsLoading(true);
     
     try {
-      // 1. Cerchiamo le appartenenze
+      // 1. Cerchiamo le appartenenze alle stanze
       const { data: memberships, error: mErr } = await supabase
         .from('room_members')
         .select('rooms (*)')
@@ -82,9 +82,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
       let privateConsole = memberRooms.find(r => r.is_private);
 
-      // 2. Se non esiste la console, la creiamo in modo forzato
+      // 2. Se non esiste la console privata, la creiamo forzatamente
       if (!privateConsole) {
-        console.log("Console non trovata, creazione in corso...");
         const { data: newRoom, error: rErr } = await supabase.from('rooms').insert({
           name: 'La mia Console', 
           is_private: true, 
@@ -110,7 +109,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
       setRooms(memberRooms);
 
-      // 3. Selezione della stanza (localStorage o Console)
+      // 3. Ripristino stanza attiva (da localStorage o la nuova console)
       const savedId = localStorage.getItem('lastActiveRoomId');
       if (savedId && memberRooms.some(r => r.id === savedId)) {
         onRoomChange(savedId);
@@ -119,8 +118,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       }
 
     } catch (err: any) {
-      console.error("Errore critico loadRooms:", err);
-      toast({ title: "Errore Caricamento", description: err.message, variant: "destructive" });
+      console.error("Errore loadRooms:", err);
     } finally {
       setRoomsLoading(false);
     }
@@ -183,7 +181,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   return (
     <div className="h-screen flex bg-gray-950 text-white overflow-hidden font-sans">
-      {/* SIDEBAR */}
+      {/* SIDEBAR SINISTRA */}
       <aside className="w-64 border-r border-gray-800 bg-gray-900/50 flex flex-col hidden md:flex">
         <div className="p-6">
           <div className="flex items-center gap-2 mb-8 justify-center">
@@ -212,7 +210,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         </div>
       </aside>
 
-      {/* MAIN */}
+      {/* CHAT AREA */}
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950">
         <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-6 flex items-center justify-between">
           <div className="flex flex-col text-left">
