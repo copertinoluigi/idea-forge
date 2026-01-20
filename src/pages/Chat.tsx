@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ChatMessage } from '@/components/ChatMessage';
 import { useToast } from '@/hooks/use-toast';
 import { AddRoomModal } from '@/components/AddRoomModal';
-import { summarizeConversation } from '@/lib/ai-service';
+import { chatWithAI } from '@/lib/ai-service'; // Importata la nuova funzione chat
 import { Send, Sparkles, Code, Settings, LogOut, Plus, Hash, MessageSquare, ShieldCheck, Loader2 } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
@@ -36,25 +36,30 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoom = rooms.find(r => r.id === activeRoomId);
 
-  // Carica stanze e seleziona la prima
+  // 1. Carica Stanze e ripristina l'ultima attiva dal localStorage
   useEffect(() => {
-    if (user) {
-      loadRooms();
-    }
+    if (user) loadRooms();
   }, [user]);
 
-  // Carica messaggi quando cambia la stanza attiva
+  useEffect(() => {
+    const savedRoomId = localStorage.getItem('lastActiveRoomId');
+    if (rooms.length > 0) {
+      if (savedRoomId && rooms.some(r => r.id === savedRoomId)) {
+        onRoomChange(savedRoomId);
+      } else if (!activeRoomId) {
+        onRoomChange(rooms[0].id);
+      }
+    }
+  }, [rooms]);
+
+  // 2. Persistenza della stanza attiva
   useEffect(() => {
     if (activeRoomId) {
+      localStorage.setItem('lastActiveRoomId', activeRoomId);
       loadMessages();
-      
       const channel = supabase.channel(`room-${activeRoomId}`)
-        .on('postgres_changes', { 
-          event: 'INSERT', 
-          schema: 'public', 
-          table: 'messages', 
-          filter: `room_id=eq.${activeRoomId}` 
-        }, async (payload) => {
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${activeRoomId}` }, 
+        async (payload) => {
           const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
           setMessages(prev => {
             if (prev.some(m => m.id === payload.new.id)) return prev;
@@ -62,58 +67,31 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           });
           setTimeout(scrollToBottom, 50);
         }).subscribe();
-        
       return () => { supabase.removeChannel(channel); };
     }
   }, [activeRoomId]);
 
   const loadRooms = async () => {
     if (!user) return;
-    const { data: memberRooms, error } = await supabase
-      .from('rooms')
-      .select('*, room_members!inner(user_email)')
-      .eq('room_members.user_email', user.email);
-
-    if (error) {
-      console.error("Error loading rooms:", error);
-      return;
-    }
-
-    if (!memberRooms || memberRooms.length === 0) {
-      // Creazione Console Automatica
+    const { data: memberRooms } = await supabase.from('rooms').select('*, room_members!inner(user_email)').eq('room_members.user_email', user.email);
+    if (memberRooms && memberRooms.length > 0) {
+      setRooms(memberRooms);
+    } else {
+      // Auto-creazione Console se non ci sono stanze
       const { data: newRoom } = await supabase.from('rooms').insert({
-        name: 'La mia Console',
-        is_private: true,
-        created_by: user.id,
-        ai_provider: 'google-flash'
+        name: 'La mia Console', is_private: true, created_by: user.id, ai_provider: 'google-flash'
       }).select().single();
-
       if (newRoom) {
         await supabase.from('room_members').insert({ room_id: newRoom.id, user_email: user.email, user_id: user.id, role: 'owner' });
         setRooms([newRoom]);
         onRoomChange(newRoom.id);
-      }
-    } else {
-      setRooms(memberRooms);
-      // Se non abbiamo una stanza attiva selezionata, forziamo la prima
-      if (!activeRoomId) {
-        onRoomChange(memberRooms[0].id);
       }
     }
   };
 
   const loadMessages = async () => {
     if (!activeRoomId) return;
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*, profiles(display_name)')
-      .eq('room_id', activeRoomId)
-      .order('created_at', { ascending: true });
-    
-    if (error) {
-      console.error("Error loading messages:", error);
-      return;
-    }
+    const { data } = await supabase.from('messages').select('*, profiles(display_name)').eq('room_id', activeRoomId).order('created_at', { ascending: true });
     setMessages((data as Message[]) || []);
     setTimeout(scrollToBottom, 50);
   };
@@ -127,36 +105,24 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     setLoading(true);
 
     try {
-      // 1. Inserimento messaggio utente
-      const { error: sendError } = await supabase.from('messages').insert({ 
-        user_id: user.id, 
-        content: content, 
-        room_id: activeRoomId 
-      });
+      // Salva messaggio utente
+      const { error } = await supabase.from('messages').insert({ user_id: user.id, content: content, room_id: activeRoomId });
+      if (error) throw error;
 
-      if (sendError) throw sendError;
-
-      // 2. Risposta AI solo se siamo in Console Privata
+      // Se è la Console Privata, trigger Chat AI (colloquiale)
       if (activeRoom?.is_private) {
-        try {
-          const result = await summarizeConversation({
-            messages: [{ user: profile?.display_name || 'Io', content }],
-            provider: activeRoom.ai_provider,
-            apiKey: activeRoom.encrypted_api_key || profile?.encrypted_api_key || ''
-          });
+        const reply = await chatWithAI({
+          messages: [{ content }],
+          provider: activeRoom.ai_provider,
+          apiKey: activeRoom.encrypted_api_key || profile?.encrypted_api_key || ''
+        });
 
-          await supabase.from('messages').insert({
-            user_id: user.id, 
-            content: result,
-            room_id: activeRoomId,
-            is_system: true
-          });
-        } catch (aiErr: any) {
-          toast({ title: "AI Error", description: aiErr.message, variant: "destructive" });
-        }
+        await supabase.from('messages').insert({
+          user_id: user.id, content: reply, room_id: activeRoomId, is_system: true
+        });
       }
     } catch (err: any) {
-      toast({ title: "Errore Invio", description: err.message, variant: "destructive" });
+      toast({ title: "Errore", description: err.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -167,32 +133,52 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   return (
     <div className="h-screen flex bg-gray-950 text-white overflow-hidden font-sans">
+      {/* Sidebar Sinistra con FIX HOVER */}
       <aside className="w-64 border-r border-gray-800 bg-gray-900/50 flex flex-col hidden md:flex">
         <div className="p-6">
-          <div className="flex items-center gap-2 mb-8">
+          <div className="flex items-center gap-2 mb-8 justify-center">
             <Sparkles className="h-6 w-6 text-violet-400" />
-            <h1 className="font-black text-xl italic tracking-tighter uppercase text-white">IdeaForge</h1>
+            <h1 className="font-black text-xl italic uppercase text-white tracking-tighter">IdeaForge</h1>
           </div>
           <div className="flex items-center justify-between mb-4 px-2">
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</p>
-            <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:text-violet-400"><Plus className="h-4 w-4" /></Button>
+            <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:bg-gray-800 hover:text-violet-400 transition-colors"><Plus className="h-4 w-4" /></Button>
           </div>
           <nav className="space-y-1 overflow-y-auto">
             {rooms.map(room => (
-              <button key={room.id} onClick={() => onRoomChange(room.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/30' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
+              <button 
+                key={room.id} 
+                onClick={() => onRoomChange(room.id)} 
+                className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all duration-200 ${
+                  activeRoomId === room.id 
+                  ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/30' 
+                  : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
+                }`}
+              >
                 {room.is_private ? <MessageSquare className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
                 <span className="truncate font-bold">{room.name}</span>
               </button>
             ))}
           </nav>
         </div>
-        <div className="mt-auto p-4 border-t border-gray-800 space-y-1">
-          {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 transition-colors"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
-          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 hover:text-white font-bold"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
-          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 hover:text-red-300 font-bold"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
+        
+        {/* Navigazione Basso con FIX HOVER */}
+        <div className="mt-auto p-4 border-t border-gray-800 space-y-1 bg-gray-900/20">
+          {isAdmin && (
+            <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300">
+              <ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata
+            </Button>
+          )}
+          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-400 font-bold hover:bg-gray-800 hover:text-white">
+            <Settings className="h-4 w-4 mr-2" /> Settings
+          </Button>
+          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300">
+            <LogOut className="h-4 w-4 mr-2" /> Logout
+          </Button>
         </div>
       </aside>
 
+      {/* Main Chat Area */}
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950">
         <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-6 flex items-center justify-between">
           <div className="flex flex-col">
@@ -200,16 +186,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{activeRoom?.ai_provider} active</span>
           </div>
           <div className="flex items-center gap-3">
-            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600 shadow-lg shadow-violet-900/40'} text-white rounded-full font-black px-5 transition-all text-[10px] uppercase tracking-widest`}>
-              <Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Conferma (${selectedMessageIds.length})` : 'Summarize'}
-            </Button>
-            <Button 
-              onClick={() => activeRoom?.mcp_endpoint ? onDevelop() : toast({title: "No MCP", description: "Configura un endpoint.", variant: "destructive"})} 
-              size="sm" 
-              className={`${activeRoom?.mcp_endpoint ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20' : 'bg-gray-800 text-gray-500 opacity-50'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}
-            >
-              <Code className="mr-2 h-3.5 w-3.5" /> Develop
-            </Button>
+            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600 shadow-lg shadow-violet-900/40'} text-white rounded-full font-black px-5 transition-all text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Conferma (${selectedMessageIds.length})` : 'Summarize'}</Button>
+            <Button onClick={() => activeRoom?.mcp_endpoint ? onDevelop() : toast({title: "No MCP", description: "Configura un endpoint.", variant: "destructive"})} size="sm" className={`${activeRoom?.mcp_endpoint ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20' : 'bg-gray-800 text-gray-500 opacity-50'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}><Code className="mr-2 h-3.5 w-3.5" /> Develop</Button>
           </div>
         </header>
 
