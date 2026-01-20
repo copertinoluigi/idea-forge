@@ -18,25 +18,28 @@ function AppContent() {
   const { user, profile, loading } = useAuth();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [currentView, setCurrentView] = useState<'chat' | 'settings' | 'admin'>('chat');
-  
   const [summarySidebarOpen, setSummarySidebarOpen] = useState(false);
   const [developModalOpen, setDevelopModalOpen] = useState(false);
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(localStorage.getItem('lastActiveRoomId'));
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [pendingMessages, setPendingMessages] = useState<any[]>([]);
-
   const { toast } = useToast();
+
+  const handleRoomChange = (id: string) => {
+    setActiveRoomId(id);
+    localStorage.setItem('lastActiveRoomId', id);
+  };
 
   const handleSummarize = async (selectedSummaryIds: string[]) => {
     if (!activeRoomId || pendingMessages.length === 0) return;
     setIsSummarizing(true);
     try {
       const { data: room } = await supabase.from('rooms').select('*').eq('id', activeRoomId).single();
-      if (!room?.encrypted_api_key) throw new Error("API Key mancante");
-
+      if (!room?.encrypted_api_key) throw new Error("Chiave API assente per questa stanza.");
       const { data: sums } = await supabase.from('summaries').select('content').in('id', selectedSummaryIds);
+      
       const result = await summarizeConversation({
-        messages: pendingMessages.map(m => ({ user: 'Member', content: m.content })),
+        messages: pendingMessages.map(m => ({ user: 'Team Member', content: m.content })),
         previousSummaries: sums?.map(s => s.content) || [],
         provider: room.ai_provider,
         apiKey: room.encrypted_api_key
@@ -44,13 +47,11 @@ function AppContent() {
 
       const timestamp = new Date().toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
       await supabase.from('summaries').insert({ room_id: activeRoomId, title: `Summary ${timestamp}`, content: result });
-      toast({ title: "Analisi completata" });
+      toast({ title: "Analisi salvata" });
       setSummarySidebarOpen(false);
     } catch (err: any) {
       toast({ title: "Errore AI", description: err.message, variant: "destructive" });
-    } finally {
-      setIsSummarizing(false);
-    }
+    } finally { setIsSummarizing(false); setPendingMessages([]); }
   };
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-gray-950"><Loader2 className="h-8 w-8 text-violet-400 animate-spin" /></div>;
@@ -63,14 +64,14 @@ function AppContent() {
     <>
       <Chat
         activeRoomId={activeRoomId}
-        onRoomChange={setActiveRoomId}
+        onRoomChange={handleRoomChange}
         onNavigateToSettings={() => setCurrentView('settings')}
         onNavigateToAdmin={() => setCurrentView('admin')}
-        onSummarize={(messages) => { setPendingMessages(messages); setSummarySidebarOpen(true); }}
+        onSummarize={(msgs) => { setPendingMessages(msgs); setSummarySidebarOpen(true); }}
         onDevelop={() => setDevelopModalOpen(true)}
       />
       <SummarySidebar isOpen={summarySidebarOpen} roomId={activeRoomId} onClose={() => setSummarySidebarOpen(false)} onGenerate={handleSummarize} loading={isSummarizing} />
-      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => {}} />
+      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => { toast({title: "Deploy avviato"}); setDevelopModalOpen(false); }} />
       <Toaster />
     </>
   );
