@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ChatMessage } from '@/components/ChatMessage';
 import { useToast } from '@/hooks/use-toast';
+import { CreateRoomModal } from '@/components/CreateRoomModal'; // Lo creeremo ora
 import {
   Send,
   Sparkles,
@@ -14,7 +15,8 @@ import {
   Plus,
   Hash,
   MessageSquare,
-  ShieldCheck
+  ShieldCheck,
+  Loader2
 } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
@@ -27,17 +29,19 @@ interface ChatProps {
   activeRoomId: string | null;
   onRoomChange: (id: string) => void;
   onNavigateToSettings: () => void;
+  onNavigateToAdmin: () => void;
   onSummarize: (selectedMessages: Message[]) => void;
   onDevelop: () => void;
 }
 
-export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onSummarize, onDevelop }: ChatProps) {
+export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavigateToAdmin, onSummarize, onDevelop }: ChatProps) {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
+  const [isCreateRoomOpen, setIsCreateRoomOpen] = useState(false);
   
   const { user, signOut } = useAuth();
   const { toast } = useToast();
@@ -58,14 +62,9 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onSumma
 
   const loadRooms = async () => {
     if (!user) return;
-    
-    // Carica stanze create da me o dove sono membro
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('rooms')
-      .select(`
-        *,
-        room_members!inner(user_email)
-      `)
+      .select('*, room_members!inner(user_email)')
       .eq('room_members.user_email', user.email);
 
     if (data) {
@@ -75,6 +74,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onSumma
   };
 
   const loadMessages = async () => {
+    if (!activeRoomId) return;
     const { data } = await supabase
       .from('messages')
       .select('*, profiles(display_name)')
@@ -96,23 +96,27 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onSumma
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !user || !activeRoomId) return;
+    if (!newMessage.trim() || !user || !activeRoomId || loading) return;
+    
+    setLoading(true);
     try {
       const { error } = await supabase.from('messages').insert({
         user_id: user.id,
         content: newMessage.trim(),
-        room_id: activeRoomId
+        room_id: activeRoomId,
+        is_system: false
       });
       if (error) throw error;
       setNewMessage('');
-    } catch (err) {
-      toast({ title: "Errore invio", variant: "destructive" });
+    } catch (err: any) {
+      toast({ title: "Errore invio", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="h-screen flex bg-gray-950 text-white overflow-hidden">
-      {/* Sidebar Sinistra */}
+    <div className="h-screen flex bg-gray-950 text-white overflow-hidden font-sans">
       <aside className="w-64 border-r border-gray-800 bg-gray-900/50 flex flex-col">
         <div className="p-6">
           <div className="flex items-center gap-2 mb-8">
@@ -122,7 +126,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onSumma
           
           <div className="flex items-center justify-between mb-4 px-2">
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</p>
-            <Button variant="ghost" size="icon" className="h-5 w-5 hover:text-violet-400">
+            <Button onClick={() => setIsCreateRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 hover:text-violet-400">
               <Plus className="h-4 w-4" />
             </Button>
           </div>
@@ -144,8 +148,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onSumma
         </div>
 
         <div className="mt-auto p-4 border-t border-gray-800 space-y-1">
-          {user?.email === 'unixgigi@gmail.com' && ( // Esempio Hardcoded Admin
-            <Button variant="ghost" className="w-full justify-start text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10">
+          {user?.email === 'unixgigi@gmail.com' && (
+            <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10">
               <ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata
             </Button>
           )}
@@ -158,7 +162,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onSumma
         </div>
       </aside>
 
-      {/* Main Chat */}
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950">
         <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-6 flex items-center justify-between">
           <div className="flex flex-col">
@@ -168,12 +171,9 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onSumma
           <div className="flex items-center gap-3">
             <Button 
               onClick={() => {
-                if(!isSelectionMode) {
-                  setIsSelectionMode(true);
-                  toast({title: "Selection Mode Attiva"});
-                } else {
-                  const selMsgs = messages.filter(m => selectedMessageIds.includes(m.id));
-                  onSummarize(selMsgs);
+                if(!isSelectionMode) { setIsSelectionMode(true); } 
+                else {
+                  onSummarize(messages.filter(m => selectedMessageIds.includes(m.id)));
                   setIsSelectionMode(false);
                   setSelectedMessageIds([]);
                 }
@@ -211,11 +211,17 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onSumma
               className="flex-1 bg-gray-800/50 border-gray-700 text-white rounded-2xl focus:ring-violet-500/50 min-h-[52px]"
             />
             <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode} className="bg-violet-600 rounded-2xl h-[52px] px-6">
-              <Send className="h-5 w-5" />
+              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
           </div>
         </form>
       </main>
+
+      <CreateRoomModal 
+        isOpen={isCreateRoomOpen} 
+        onClose={() => setIsCreateRoomOpen(false)} 
+        onSuccess={() => { loadRooms(); setIsCreateRoomOpen(false); }} 
+      />
     </div>
   );
 }
