@@ -27,6 +27,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [roomsLoading, setRoomsLoading] = useState(true);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [isAddRoomOpen, setIsAddRoomOpen] = useState(false);
@@ -54,29 +55,32 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   const loadRooms = async () => {
     if (!user) return;
+    setRoomsLoading(true);
     
-    // Query esplicita per ottenere le stanze tramite la tabella di legame room_members
     const { data: memberships, error: mErr } = await supabase
       .from('room_members')
       .select('room_id, rooms (*)')
       .eq('user_email', user.email);
 
-    if (mErr) return;
+    if (mErr) {
+      console.error("Error loading memberships:", mErr);
+      setRoomsLoading(false);
+      return;
+    }
 
-    // Mappatura sicura per TypeScript: estraiamo l'oggetto room da ogni riga di membership
     const memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
     const privateConsole = memberRooms.find(r => r.is_private);
 
     if (!privateConsole) {
-      // Creazione sicura della Console Privata (il vincolo UNIQUE nel DB impedirà duplicati reali)
       const { data: newRoom, error: rErr } = await supabase.from('rooms').insert({
         name: 'La mia Console', is_private: true, created_by: user.id, ai_provider: 'google-flash'
       }).select().single();
 
-      if (newRoom) {
+      if (rErr) {
+        console.error("Error creating private room:", rErr);
+      } else if (newRoom) {
         await supabase.from('room_members').insert({ room_id: newRoom.id, user_email: user.email, user_id: user.id, role: 'owner' });
-        const updatedRooms = [newRoom, ...memberRooms];
-        setRooms(updatedRooms);
+        setRooms([newRoom, ...memberRooms]);
         onRoomChange(newRoom.id);
       }
     } else {
@@ -88,11 +92,16 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         onRoomChange(privateConsole.id);
       }
     }
+    setRoomsLoading(false);
   };
 
   const loadMessages = async () => {
     if (!activeRoomId) return;
-    const { data } = await supabase.from('messages').select('*, profiles(display_name)').eq('room_id', activeRoomId).order('created_at', { ascending: true });
+    const { data, error } = await supabase.from('messages').select('*, profiles(display_name)').eq('room_id', activeRoomId).order('created_at', { ascending: true });
+    if (error) {
+      console.error("Error loading messages:", error);
+      return;
+    }
     setMessages((data as Message[]) || []);
     setTimeout(scrollToBottom, 50);
   };
@@ -105,7 +114,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     setLoading(true);
 
     try {
-      await supabase.from('messages').insert({ user_id: user.id, content, room_id: activeRoomId });
+      const { error: sendError } = await supabase.from('messages').insert({ user_id: user.id, content, room_id: activeRoomId });
+      if (sendError) throw sendError;
 
       if (activeRoom?.is_private) {
         const reply = await chatWithAI({
@@ -143,7 +153,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:text-violet-400"><Plus className="h-4 w-4" /></Button>
           </div>
           <nav className="space-y-1 overflow-y-auto">
-            {rooms.map(room => (
+            {roomsLoading ? <Loader2 className="animate-spin mx-auto mt-4 text-gray-700" /> : rooms.map(room => (
               <button key={room.id} onClick={() => onRoomChange(room.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all duration-200 ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'}`}>
                 {room.is_private ? <MessageSquare className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
                 <span className="truncate font-bold">{room.name}</span>
@@ -186,7 +196,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
         <form onSubmit={handleSend} className="p-6 bg-gray-900/30 border-t border-gray-800">
           <div className="max-w-4xl mx-auto flex gap-4">
-            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : "Chatta o scrivi al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
+            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : "Scrivi alla tua AI o al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
             <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-2xl h-[56px] px-6 shadow-xl shadow-violet-900/30">
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
