@@ -173,35 +173,43 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       {/* AREA CHAT PRINCIPALE */}
       <main className="flex-1 flex flex-col min-w-0 h-full relative">
         <header className="h-16 border-b border-gray-800 bg-gray-950/80 backdrop-blur-xl px-4 md:px-6 flex items-center justify-between sticky top-0 z-30">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(true)} className="md:hidden">
-              <Menu className="h-6 w-6 text-gray-400" />
-            </Button>
-            <div className="flex flex-col overflow-hidden max-w-[150px] md:max-w-none text-left">
-              <h2 className="font-bold text-sm text-white truncate uppercase italic tracking-tight">{rooms.find(r => r.id === activeRoomId)?.name || '...'}</h2>
-              <span className="text-[9px] text-violet-400 font-black uppercase tracking-widest">{rooms.find(r => r.id === activeRoomId)?.ai_provider || 'Engine'}</span>
-            </div>
-          </div>
+  <div className="flex items-center gap-3">
+    <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(true)} className="md:hidden">
+      <Menu className="h-6 w-6 text-gray-400" />
+    </Button>
+    <div className="flex flex-col text-left overflow-hidden">
+      <div className="flex items-center gap-2">
+        <h2 className="font-bold text-sm text-white truncate uppercase italic tracking-tight">
+          {activeRoom?.name || 'Caricamento...'}
+        </h2>
+        {/* MOSTRA IL CODICE SOLO SE NON È PRIVATA */}
+        {!activeRoom?.is_private && activeRoom?.join_code && (
+          <button 
+            onClick={copyJoinCode}
+            className="bg-gray-800 text-[10px] px-2 py-0.5 rounded border border-gray-700 text-violet-400 hover:text-white font-mono flex items-center gap-1 transition-all active:scale-95"
+          >
+            #{activeRoom.join_code} <Copy className="h-2.5 w-2.5" />
+          </button>
+        )}
+      </div>
+      <span className="text-[9px] text-gray-500 font-black uppercase tracking-widest">
+        {activeRoom?.ai_provider} Core Active
+      </span>
+    </div>
+  </div>
 
-          <div className="flex items-center gap-2">
-            <Button onClick={() => { 
-                if(!isSelectionMode) setIsSelectionMode(true); 
-                else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } 
-              }} 
-              size="sm" 
-              className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600'} text-white rounded-full font-black px-3 md:px-5 h-9 text-[10px] uppercase`}
-            >
-              <Sparkles className="mr-1.5 h-3.5 w-3.5" /> 
-              <span className="hidden xs:inline">{isSelectionMode ? `Confirm (${selectedMessageIds.length})` : 'Summarize'}</span>
-              <span className="xs:hidden">{isSelectionMode ? selectedMessageIds.length : ''}</span>
-            </Button>
-            
-            <Button onClick={onDevelop} disabled={!rooms.find(r => r.id === activeRoomId)?.mcp_endpoint} size="sm" className="bg-emerald-600 text-white rounded-full font-black px-3 md:px-5 h-9 text-[10px] uppercase shadow-lg shadow-emerald-900/20">
-              <Code className="h-3.5 w-3.5 md:mr-1.5" />
-              <span className="hidden md:inline">Develop</span>
-            </Button>
-          </div>
-        </header>
+  <div className="flex items-center gap-2">
+    {/* I bottoni Summarize e Develop restano invariati */}
+    <Button onClick={handleSummarizeClick} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600'} text-white rounded-full font-black px-3 md:px-5 h-9 text-[10px] uppercase`}>
+      <Sparkles className="mr-1.5 h-3.5 w-3.5" /> 
+      <span className="hidden xs:inline">{isSelectionMode ? `Conferma (${selectedMessageIds.length})` : 'Summarize'}</span>
+    </Button>
+    <Button onClick={onDevelop} disabled={!activeRoom?.mcp_endpoint} size="sm" className="bg-emerald-600 text-white rounded-full font-black px-3 md:px-5 h-9 text-[10px] uppercase shadow-lg shadow-emerald-900/20">
+      <Code className="h-3.5 w-3.5 md:mr-1.5" />
+      <span className="hidden md:inline">Develop</span>
+    </Button>
+  </div>
+</header>
 
         {/* LISTA MESSAGGI (OTTIMIZZATA PER TOUCH) */}
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar pb-24 md:pb-6">
