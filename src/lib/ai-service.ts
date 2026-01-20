@@ -54,7 +54,7 @@ export async function chatWithAI({ messages, provider, apiKey }: { messages: any
     model,
     system: "Sei un assistente AI versatile. Rispondi in modo naturale e colloquiale. Puoi aiutare con il codice, rispondere a domande generali o semplicemente chiacchierare. Non usare prompt da startup coach qui.",
     prompt: messages[messages.length - 1].content,
-    temperature: 0.8,
+    temperature: 0.2,
   });
   return text;
 }
@@ -80,7 +80,7 @@ export async function summarizeConversation({ messages, previousSummaries = [], 
     model,
     system: "Sei un esperto Startup Coach. Il tuo compito è analizzare la chat e distillare insights critici, roadmap e analisi di mercato. Sii molto professionale e tecnico.",
     prompt: `Analizza questa conversazione.${contextLayers}\n\nNUOVI MESSAGGI:\n${conversationText}`,
-    temperature: 0.7,
+    temperature: 0.0,
   });
   return text;
 }
