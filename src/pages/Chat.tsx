@@ -144,7 +144,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onSumma
         </div>
 
         <div className="mt-auto p-4 border-t border-gray-800 space-y-1">
-          {user?.email === 'info@luigicopertino.it' && ( // Esempio Hardcoded Admin
+          {user?.email === 'unixgigi@gmail.com' && ( // Esempio Hardcoded Admin
             <Button variant="ghost" className="w-full justify-start text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10">
               <ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata
             </Button>
