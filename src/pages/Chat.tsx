@@ -37,16 +37,27 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoom = rooms.find(r => r.id === activeRoomId);
 
-  useEffect(() => { if (user) loadRooms(); }, [user]);
+  // 1. CARICAMENTO STANZE (Logica Anti-Refresh)
+  useEffect(() => {
+    if (user) loadRooms();
+  }, [user]);
 
+  // 2. CARICAMENTO MESSAGGI (Triggerato dal cambio stanza)
   useEffect(() => {
     if (activeRoomId) {
       loadMessages();
       const channel = supabase.channel(`room-${activeRoomId}`)
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${activeRoomId}` }, 
-        async (payload) => {
+        .on('postgres_changes', { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'messages', 
+          filter: `room_id=eq.${activeRoomId}` 
+        }, async (payload) => {
           const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
-          setMessages(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, { ...payload.new, profiles: p } as Message]));
+          setMessages(prev => {
+            if (prev.some(m => m.id === payload.new.id)) return prev;
+            return [...prev, { ...payload.new, profiles: p } as Message];
+          });
           setTimeout(scrollToBottom, 50);
         }).subscribe();
       return () => { supabase.removeChannel(channel); };
@@ -57,83 +68,106 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     if (!user) return;
     setRoomsLoading(true);
     
-    const { data: memberships, error: mErr } = await supabase
-      .from('room_members')
-      .select('room_id, rooms (*)')
-      .eq('user_email', user.email);
+    try {
+      // Cerchiamo le stanze dove l'utente è presente
+      const { data: memberships } = await supabase
+        .from('room_members')
+        .select('rooms(*)')
+        .eq('user_email', user.email);
 
-    if (mErr) {
-      console.error("Error loading memberships:", mErr);
-      setRoomsLoading(false);
-      return;
-    }
+      let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
+      let privateConsole = memberRooms.find(r => r.is_private);
 
-    const memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
-    const privateConsole = memberRooms.find(r => r.is_private);
+      // Se non c'è la console, proviamo a crearla
+      if (!privateConsole) {
+        const { data: newRoom, error: createError } = await supabase.from('rooms').insert({
+          name: 'La mia Console', 
+          is_private: true, 
+          created_by: user.id, 
+          ai_provider: 'google-flash'
+        }).select().single();
 
-    if (!privateConsole) {
-      const { data: newRoom, error: rErr } = await supabase.from('rooms').insert({
-        name: 'La mia Console', is_private: true, created_by: user.id, ai_provider: 'google-flash'
-      }).select().single();
-
-      if (rErr) {
-        console.error("Error creating private room:", rErr);
-      } else if (newRoom) {
-        await supabase.from('room_members').insert({ room_id: newRoom.id, user_email: user.email, user_id: user.id, role: 'owner' });
-        setRooms([newRoom, ...memberRooms]);
-        onRoomChange(newRoom.id);
+        if (!createError && newRoom) {
+          await supabase.from('room_members').insert({ 
+            room_id: newRoom.id, 
+            user_email: user.email, 
+            user_id: user.id, 
+            role: 'owner' 
+          });
+          memberRooms = [newRoom, ...memberRooms];
+          privateConsole = newRoom;
+        } else {
+          // Se l'insert fallisce per il vincolo UNIQUE, la cerchiamo di nuovo (corsa critica)
+          const { data: retry } = await supabase.from('rooms').select('*').eq('created_by', user.id).eq('is_private', true).single();
+          if (retry) privateConsole = retry;
+        }
       }
-    } else {
+
       setRooms(memberRooms);
+
+      // Ripristino ID stanza dal localStorage o console
       const savedId = localStorage.getItem('lastActiveRoomId');
       if (savedId && memberRooms.some(r => r.id === savedId)) {
         onRoomChange(savedId);
-      } else {
+      } else if (privateConsole) {
         onRoomChange(privateConsole.id);
       }
+
+    } catch (err) {
+      console.error("LoadRooms Error:", err);
+    } finally {
+      setRoomsLoading(false);
     }
-    setRoomsLoading(false);
   };
 
   const loadMessages = async () => {
     if (!activeRoomId) return;
-    const { data, error } = await supabase.from('messages').select('*, profiles(display_name)').eq('room_id', activeRoomId).order('created_at', { ascending: true });
-    if (error) {
-      console.error("Error loading messages:", error);
-      return;
-    }
-    setMessages((data as Message[]) || []);
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*, profiles(display_name)')
+      .eq('room_id', activeRoomId)
+      .order('created_at', { ascending: true });
+    
+    if (!error) setMessages(data as Message[]);
     setTimeout(scrollToBottom, 50);
   };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !user || !activeRoomId || loading) return;
+    
     const content = newMessage.trim();
     setNewMessage('');
     setLoading(true);
 
     try {
-      const { error: sendError } = await supabase.from('messages').insert({ user_id: user.id, content, room_id: activeRoomId });
+      // Inserimento Messaggio Utente
+      const { error: sendError } = await supabase.from('messages').insert({ 
+        user_id: user.id, 
+        content, 
+        room_id: activeRoomId 
+      });
       if (sendError) throw sendError;
 
+      // Trigger AI se privata
       if (activeRoom?.is_private) {
         const reply = await chatWithAI({
           messages: [...messages.map(m => ({ content: m.content })), { content }],
           provider: activeRoom.ai_provider,
           apiKey: activeRoom.encrypted_api_key || profile?.encrypted_api_key || ''
         });
-        await supabase.from('messages').insert({ user_id: user.id, content: reply, room_id: activeRoomId, is_system: true });
+
+        await supabase.from('messages').insert({
+          user_id: user.id, 
+          content: reply, 
+          room_id: activeRoomId, 
+          is_system: true 
+        });
       }
     } catch (err: any) {
-      toast({ title: "Errore AI", description: err.message, variant: "destructive" });
-    } finally { setLoading(false); }
-  };
-
-  const copyJoinCode = () => {
-    if (activeRoom?.join_code) {
-      navigator.clipboard.writeText(activeRoom.join_code);
-      toast({ title: "Codice Copiato" });
+      toast({ title: "Errore", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -153,17 +187,19 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:text-violet-400"><Plus className="h-4 w-4" /></Button>
           </div>
           <nav className="space-y-1 overflow-y-auto">
-            {roomsLoading ? <Loader2 className="animate-spin mx-auto mt-4 text-gray-700" /> : rooms.map(room => (
-              <button key={room.id} onClick={() => onRoomChange(room.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all duration-200 ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'}`}>
+            {roomsLoading ? (
+              <div className="flex justify-center p-4"><Loader2 className="animate-spin h-5 w-5 text-gray-700" /></div>
+            ) : rooms.map(room => (
+              <button key={room.id} onClick={() => onRoomChange(room.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all duration-200 ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
                 {room.is_private ? <MessageSquare className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
-                <span className="truncate font-bold">{room.name}</span>
+                <span className="truncate font-bold tracking-tight">{room.name}</span>
               </button>
             ))}
           </nav>
         </div>
-        <div className="mt-auto p-4 border-t border-gray-800 space-y-1 bg-gray-900/10">
+        <div className="mt-auto p-4 border-t border-gray-800 space-y-1">
           {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
-          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 font-bold hover:bg-gray-800 hover:text-white transition-colors"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
+          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-400 font-bold hover:bg-gray-800 hover:text-white transition-colors"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
           <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300 transition-colors"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
         </div>
       </aside>
@@ -174,16 +210,14 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <div className="flex items-center gap-2">
               <h2 className="font-bold text-sm text-white uppercase tracking-tighter italic">{activeRoom?.name || 'Inizializzazione...'}</h2>
               {!activeRoom?.is_private && activeRoom?.join_code && (
-                <button onClick={copyJoinCode} className="bg-gray-800 text-[10px] px-2 py-0.5 rounded border border-gray-700 text-gray-400 hover:text-white flex items-center gap-1 transition-colors">
-                  #{activeRoom.join_code} <Copy className="h-2.5 w-2.5" />
-                </button>
+                <button onClick={() => { navigator.clipboard.writeText(activeRoom.join_code!); toast({title: "Codice Copiato"}); }} className="bg-gray-800 text-[10px] px-2 py-0.5 rounded border border-gray-700 text-gray-400 hover:text-white flex items-center gap-1">#{activeRoom.join_code} <Copy className="h-2.5 w-2.5" /></button>
               )}
             </div>
-            <span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{activeRoom?.ai_provider} active</span>
+            <span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{activeRoom?.ai_provider} brain active</span>
           </div>
           <div className="flex items-center gap-3">
-            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600 shadow-lg shadow-violet-900/40'} text-white rounded-full font-black px-5 transition-all text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Conferma (${selectedMessageIds.length})` : 'Summarize'}</Button>
-            <Button onClick={() => onDevelop()} disabled={!activeRoom?.mcp_endpoint} size="sm" className={`${activeRoom?.mcp_endpoint ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20' : 'bg-gray-800 text-gray-500 opacity-50'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}><Code className="mr-2 h-3.5 w-3.5" /> Develop</Button>
+            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600 shadow-lg'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Conferma (${selectedMessageIds.length})` : 'Summarize'}</Button>
+            <Button onClick={() => onDevelop()} disabled={!activeRoom?.mcp_endpoint} size="sm" className={`${activeRoom?.mcp_endpoint ? 'bg-emerald-600' : 'bg-gray-800 text-gray-600 opacity-50'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}><Code className="mr-2 h-3.5 w-3.5" /> Develop</Button>
           </div>
         </header>
 
@@ -196,7 +230,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
         <form onSubmit={handleSend} className="p-6 bg-gray-900/30 border-t border-gray-800">
           <div className="max-w-4xl mx-auto flex gap-4">
-            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : "Scrivi alla tua AI o al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
+            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : "Chatta o scrivi al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
             <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-2xl h-[56px] px-6 shadow-xl shadow-violet-900/30">
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
