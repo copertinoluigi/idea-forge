@@ -12,8 +12,6 @@ import {
   Trash2, 
   ShieldCheck, 
   Activity,
-  Mail,
-  Calendar,
   RefreshCw
 } from 'lucide-react';
 
@@ -93,7 +91,7 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
             </div>
           </div>
           <Button onClick={loadAdminData} disabled={loading} variant="secondary" className="bg-gray-800 text-white hover:bg-gray-700 border-gray-700">
-            {loading ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
             Refresh Stats
           </Button>
         </div>
