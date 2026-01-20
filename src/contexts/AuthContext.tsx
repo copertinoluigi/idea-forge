@@ -22,52 +22,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const syncProfile = async (userId: string, email: string) => {
+  const loadProfile = async (userId: string, email: string) => {
     try {
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
       if (error) throw error;
       
       if (data) {
         setProfile(data);
+        return data;
       } else {
-        // Creazione forzata se il profilo manca (Auto-Repair)
-        console.log("Auth: Profilo non trovato, creazione di emergenza...");
+        // Auto-creazione di emergenza se l'utente esiste ma il profilo no
         const { data: newProfile, error: createError } = await supabase.from('profiles').insert({
-          id: userId, 
-          email, 
-          display_name: email.split('@')[0], 
-          has_completed_setup: false
+          id: userId, email, display_name: email.split('@')[0], has_completed_setup: false
         }).select().single();
-        
-        if (!createError) setProfile(newProfile);
+        if (createError) throw createError;
+        setProfile(newProfile);
+        return newProfile;
       }
     } catch (e) {
-      console.error("AuthContext: Errore durante la sincronizzazione profilo", e);
+      console.error("AuthContext: Profile Sync Error", e);
+      return null;
     }
   };
 
   useEffect(() => {
     let mounted = true;
 
-    async function getInitialSession() {
+    const initialize = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (mounted) {
         if (session?.user) {
           setUser(session.user);
-          await syncProfile(session.user.id, session.user.email!);
+          await loadProfile(session.user.id, session.user.email!);
         }
         setLoading(false);
       }
-    }
+    };
 
-    getInitialSession();
+    initialize();
 
-    // FIX: Aggiunto underscore a _event per evitare l'errore TS6133
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (mounted) {
         if (session?.user) {
           setUser(session.user);
-          await syncProfile(session.user.id, session.user.email!);
+          await loadProfile(session.user.id, session.user.email!);
         } else {
           setUser(null);
           setProfile(null);
@@ -79,6 +77,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => { mounted = false; subscription.unsubscribe(); };
   }, []);
 
+  const refreshProfile = async () => {
+    if (user) await loadProfile(user.id, user.email!);
+  };
+
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
@@ -86,40 +88,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string, displayName: string, inviteCode: string) => {
     const { data: invite } = await supabase.from('invites').select('*').eq('code', inviteCode).eq('is_used', false).maybeSingle();
-    if (!invite) throw new Error('Codice invito non valido o già usato.');
+    if (!invite) throw new Error('Invito non valido o già usato.');
 
     const { data: authData, error: authErr } = await supabase.auth.signUp({ email, password });
     if (authErr) throw authErr;
-    if (!authData.user) throw new Error('Creazione account fallita.');
+    if (!authData.user) throw new Error('Signup fallito.');
 
-    const { error: pErr } = await supabase.from('profiles').insert({
-      id: authData.user.id,
-      email,
-      display_name: displayName,
-      has_completed_setup: false
-    });
-    if (pErr) throw pErr;
-
+    await supabase.from('profiles').insert({ id: authData.user.id, email, display_name: displayName, has_completed_setup: false });
     await supabase.from('invites').update({ is_used: true, used_by: authData.user.id, used_at: new Date().toISOString() }).eq('id', invite.id);
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
-    localStorage.clear();
     setUser(null);
     setProfile(null);
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      profile, 
-      loading, 
-      refreshProfile: async () => { if(user) await syncProfile(user.id, user.email!); }, 
-      signIn, 
-      signUp, 
-      signOut 
-    }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
@@ -127,6 +113,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) throw new Error('useAuth deve essere usato dentro AuthProvider');
+  if (context === undefined) throw new Error('useAuth error');
   return context;
 }
