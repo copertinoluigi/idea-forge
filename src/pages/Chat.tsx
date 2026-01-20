@@ -38,7 +38,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   useEffect(() => { if (user) loadRooms(); }, [user]);
 
-  // Sincronizzazione automatica all'avvio
   useEffect(() => {
     if (rooms.length > 0 && !activeRoomId) {
       onRoomChange(rooms[0].id);
@@ -104,32 +103,28 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     setLoading(true);
 
     try {
-      // 1. Salva messaggio utente
-      const { data: userMsg, error } = await supabase.from('messages').insert({ 
+      const { error } = await supabase.from('messages').insert({ 
         user_id: user.id, 
         content: content, 
         room_id: activeRoomId 
-      }).select().single();
+      });
 
       if (error) throw error;
 
-      // 2. Se è la Console Privata, trigger AI Response
       if (activeRoom?.is_private) {
         const result = await summarizeConversation({
-          messages: [{ user: user.display_name, content }],
+          messages: [{ user: profile?.display_name || 'User', content }],
           provider: activeRoom.ai_provider,
           apiKey: activeRoom.encrypted_api_key || profile?.encrypted_api_key || ''
         });
 
-        // Salva risposta AI
         await supabase.from('messages').insert({
-          user_id: user.id, // In un sistema reale useremmo un system_id
+          user_id: user.id,
           content: result,
           room_id: activeRoomId,
           is_system: true
         });
       }
-
     } catch (err: any) {
       toast({ title: "Errore", description: err.message, variant: "destructive" });
     } finally {
@@ -146,10 +141,10 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         <div className="p-6">
           <div className="flex items-center gap-2 mb-8">
             <Sparkles className="h-6 w-6 text-violet-400" />
-            <h1 className="font-black text-xl italic tracking-tighter uppercase text-white">IdeaForge</h1>
+            <h1 className="font-black text-xl italic tracking-tighter uppercase text-white text-center">IdeaForge</h1>
           </div>
           <div className="flex items-center justify-between mb-4 px-2">
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</p>
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest font-black">Workspace</p>
             <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:text-violet-400"><Plus className="h-4 w-4" /></Button>
           </div>
           <nav className="space-y-1 overflow-y-auto">
@@ -162,24 +157,24 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </nav>
         </div>
         <div className="mt-auto p-4 border-t border-gray-800 space-y-1">
-          {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:text-emerald-300 hover:bg-emerald-500/10"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
-          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 hover:text-white"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
-          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 hover:text-red-300"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
+          {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:text-emerald-300 hover:bg-emerald-500/10 tracking-widest uppercase italic"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
+          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 hover:text-white font-bold"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
+          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 hover:text-red-300 font-bold"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
         </div>
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950">
         <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-6 flex items-center justify-between">
           <div className="flex flex-col">
-            <h2 className="font-bold text-sm text-white tracking-tight">{activeRoom?.name || 'Loading...'}</h2>
-            <span className="text-[9px] text-gray-500 uppercase tracking-widest font-black">{activeRoom?.ai_provider} Core</span>
+            <h2 className="font-black text-sm text-white tracking-widest uppercase italic">{activeRoom?.name || 'Loading...'}</h2>
+            <span className="text-[9px] text-gray-500 uppercase tracking-[0.2em] font-black">{activeRoom?.ai_provider} engine active</span>
           </div>
           <div className="flex items-center gap-3">
-            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600'} text-white rounded-full font-bold px-4`}><Sparkles className="mr-2 h-4 w-4" /> {isSelectionMode ? `Confirm (${selectedMessageIds.length})` : 'Summarize'}</Button>
+            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600'} text-white rounded-full font-black px-4 transition-all uppercase tracking-tighter text-xs shadow-lg shadow-violet-900/40`}><Sparkles className="mr-2 h-4 w-4" /> {isSelectionMode ? `Confirm (${selectedMessageIds.length})` : 'Summarize'}</Button>
             <Button 
               onClick={() => activeRoom?.mcp_endpoint ? onDevelop() : toast({title: "No MCP configured", description: "Configura un endpoint nelle impostazioni della stanza.", variant: "destructive"})} 
               size="sm" 
-              className={`${activeRoom?.mcp_endpoint ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-gray-800 text-gray-500 opacity-50 cursor-not-allowed'} text-white rounded-full font-bold px-4`}
+              className={`${activeRoom?.mcp_endpoint ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-gray-800 text-gray-500 opacity-50 cursor-not-allowed'} text-white rounded-full font-black px-4 uppercase tracking-tighter text-xs shadow-lg shadow-emerald-900/20`}
             >
               <Code className="mr-2 h-4 w-4" /> Develop
             </Button>
@@ -195,8 +190,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
         <form onSubmit={handleSend} className="p-6 bg-gray-900/30 border-t border-gray-800">
           <div className="max-w-4xl mx-auto flex gap-4">
-            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma" : "Chatta con l'AI o scrivi al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[52px] resize-none" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
-            <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-2xl h-[52px] px-6 shadow-lg">
+            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto" : "Chatta con l'AI o scrivi al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[52px] resize-none font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
+            <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-2xl h-[52px] px-6 shadow-lg shadow-violet-900/40">
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
           </div>
