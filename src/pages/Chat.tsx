@@ -54,18 +54,29 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   const loadRooms = async () => {
     if (!user) return;
-    const { data: memberships } = await supabase.from('room_members').select('room_id, rooms(*)').eq('user_email', user.email);
-    const memberRooms = memberships?.map(m => m.rooms).filter(Boolean) as Room[] || [];
+    
+    // Query esplicita per ottenere le stanze tramite la tabella di legame room_members
+    const { data: memberships, error: mErr } = await supabase
+      .from('room_members')
+      .select('room_id, rooms (*)')
+      .eq('user_email', user.email);
+
+    if (mErr) return;
+
+    // Mappatura sicura per TypeScript: estraiamo l'oggetto room da ogni riga di membership
+    const memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
     const privateConsole = memberRooms.find(r => r.is_private);
 
     if (!privateConsole) {
-      const { data: newRoom } = await supabase.from('rooms').insert({
+      // Creazione sicura della Console Privata (il vincolo UNIQUE nel DB impedirà duplicati reali)
+      const { data: newRoom, error: rErr } = await supabase.from('rooms').insert({
         name: 'La mia Console', is_private: true, created_by: user.id, ai_provider: 'google-flash'
       }).select().single();
 
       if (newRoom) {
         await supabase.from('room_members').insert({ room_id: newRoom.id, user_email: user.email, user_id: user.id, role: 'owner' });
-        setRooms([newRoom, ...memberRooms]);
+        const updatedRooms = [newRoom, ...memberRooms];
+        setRooms(updatedRooms);
         onRoomChange(newRoom.id);
       }
     } else {
@@ -109,6 +120,13 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     } finally { setLoading(false); }
   };
 
+  const copyJoinCode = () => {
+    if (activeRoom?.join_code) {
+      navigator.clipboard.writeText(activeRoom.join_code);
+      toast({ title: "Codice Copiato" });
+    }
+  };
+
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   const isAdmin = user?.email === 'info@luigicopertino.it' || user?.email === 'unixgigi@gmail.com';
 
@@ -122,7 +140,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </div>
           <div className="flex items-center justify-between mb-4 px-2">
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</p>
-            <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:text-violet-400 transition-colors"><Plus className="h-4 w-4" /></Button>
+            <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:text-violet-400"><Plus className="h-4 w-4" /></Button>
           </div>
           <nav className="space-y-1 overflow-y-auto">
             {rooms.map(room => (
@@ -142,11 +160,13 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950">
         <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-6 flex items-center justify-between">
-          <div className="flex flex-col">
+          <div className="flex flex-col text-left">
             <div className="flex items-center gap-2">
               <h2 className="font-bold text-sm text-white uppercase tracking-tighter italic">{activeRoom?.name || 'Inizializzazione...'}</h2>
               {!activeRoom?.is_private && activeRoom?.join_code && (
-                <button onClick={() => { navigator.clipboard.writeText(activeRoom.join_code!); toast({title: "Codice Copiato"}); }} className="bg-gray-800 text-[10px] px-2 py-0.5 rounded border border-gray-700 text-gray-400 hover:text-white flex items-center gap-1 transition-colors">#{activeRoom.join_code} <Copy className="h-2.5 w-2.5" /></button>
+                <button onClick={copyJoinCode} className="bg-gray-800 text-[10px] px-2 py-0.5 rounded border border-gray-700 text-gray-400 hover:text-white flex items-center gap-1 transition-colors">
+                  #{activeRoom.join_code} <Copy className="h-2.5 w-2.5" />
+                </button>
               )}
             </div>
             <span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{activeRoom?.ai_provider} active</span>
@@ -166,8 +186,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
         <form onSubmit={handleSend} className="p-6 bg-gray-900/30 border-t border-gray-800">
           <div className="max-w-4xl mx-auto flex gap-4">
-            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : "Scrivi alla tua AI o al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
-            <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-2xl h-[56px] px-6 shadow-xl shadow-violet-900/30 transition-transform active:scale-95">
+            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : "Chatta o scrivi al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
+            <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-2xl h-[56px] px-6 shadow-xl shadow-violet-900/30">
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
           </div>
