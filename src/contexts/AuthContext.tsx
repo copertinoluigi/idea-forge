@@ -23,46 +23,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const loadProfile = async (userId: string) => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
-    setProfile(data);
-    return data;
-  };
-
-  const refreshProfile = async () => {
-    if (user) {
-      await loadProfile(user.id);
+    try {
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+      if (error) throw error;
+      setProfile(data);
+      return data;
+    } catch (err) {
+      console.error("AuthContext: Error loading profile", err);
+      return null;
     }
   };
 
   useEffect(() => {
-    // Gestione sessione iniziale
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
+    let mounted = true;
+
+    const initAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user && mounted) {
         setUser(session.user);
-        loadProfile(session.user.id).then(() => setLoading(false));
-      } else {
+        await loadProfile(session.user.id);
+      }
+      if (mounted) setLoading(false);
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (mounted) {
+        if (session?.user) {
+          setUser(session.user);
+          await loadProfile(session.user.id);
+        } else {
+          setUser(null);
+          setProfile(null);
+        }
         setLoading(false);
       }
     });
 
-    // Ascolto cambiamenti auth
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        await loadProfile(session.user.id);
-      } else {
-        setUser(null);
-        setProfile(null);
-      }
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    return () => { mounted = false; subscription.unsubscribe(); };
   }, []);
+
+  const refreshProfile = async () => {
+    if (user) await loadProfile(user.id);
+  };
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -70,31 +74,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, displayName: string, inviteCode: string) => {
-    const { data: invite } = await supabase
-      .from('invites')
-      .select('*')
-      .eq('code', inviteCode)
-      .eq('is_used', false)
-      .maybeSingle();
-
-    if (!invite) throw new Error('Codice invito non valido o già usato');
+    const { data: invite } = await supabase.from('invites').select('*').eq('code', inviteCode).eq('is_used', false).maybeSingle();
+    if (!invite) throw new Error('Codice non valido o già usato');
 
     const { data: authData, error: signUpError } = await supabase.auth.signUp({ email, password });
     if (signUpError) throw signUpError;
-    if (!authData.user) throw new Error('Errore creazione utente');
+    if (!authData.user) throw new Error('User creation failed');
 
-    const { error: profileError } = await supabase.from('profiles').insert({
-      id: authData.user.id,
-      email,
-      display_name: displayName,
-    });
-    if (profileError) throw profileError;
+    const { error: pErr } = await supabase.from('profiles').insert({ id: authData.user.id, email, display_name: displayName });
+    if (pErr) throw pErr;
 
-    await supabase.from('invites').update({
-      is_used: true,
-      used_by: authData.user.id,
-      used_at: new Date().toISOString(),
-    }).eq('id', invite.id);
+    await supabase.from('invites').update({ is_used: true, used_by: authData.user.id, used_at: new Date().toISOString() }).eq('id', invite.id);
   };
 
   const signOut = async () => {
