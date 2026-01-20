@@ -13,8 +13,8 @@ export interface AIConfig {
 }
 
 export const AI_PROVIDERS: AIConfig[] = [
-  { value: 'google-flash', label: 'Gemini 1.5 Flash', model: 'gemini-1.5-flash', provider: 'google' },
-  { value: 'google-pro', label: 'Gemini 1.5 Pro', model: 'gemini-1.5-pro', provider: 'google' },
+  { value: 'google-flash', label: 'Gemini 1.5 Flash', model: 'flash', provider: 'google' },
+  { value: 'google-pro', label: 'Gemini 1.5 Pro', model: 'pro', provider: 'google' },
   { value: 'openai-4o', label: 'GPT-4o', model: 'gpt-4o', provider: 'openai' },
   { value: 'openai-4', label: 'GPT-4 Turbo', model: 'gpt-4-turbo', provider: 'openai' },
   { value: 'anthropic-sonnet', label: 'Claude 3.5 Sonnet', model: 'claude-3-5-sonnet-20241022', provider: 'anthropic' },
@@ -36,7 +36,7 @@ async function getDynamicGeminiModel(apiKey: string, type: string): Promise<stri
   }
 }
 
-// 1. LOGICA CHAT (USATA NELLA CONSOLE PRIVATA)
+// 1. CHAT COLLOQUIALE (Per la Console Privata)
 export async function chatWithAI({ messages, provider, apiKey }: { messages: any[], provider: string, apiKey: string }) {
   const config = AI_PROVIDERS.find(p => p.value === provider) || AI_PROVIDERS[0];
   let model;
@@ -52,14 +52,14 @@ export async function chatWithAI({ messages, provider, apiKey }: { messages: any
 
   const { text } = await generateText({
     model,
-    system: "Sei un assistente AI versatile. Rispondi in modo colloquiale, aiuta con il coding o chiacchiera del più e del meno. Sii breve e diretto.",
+    system: "Sei un assistente AI versatile. Rispondi in modo naturale e colloquiale. Puoi aiutare con il codice, rispondere a domande generali o semplicemente chiacchierare. Non usare prompt da startup coach qui.",
     prompt: messages[messages.length - 1].content,
     temperature: 0.8,
   });
   return text;
 }
 
-// 2. LOGICA SUMMARIZE (USATA NELLE STANZE DI GRUPPO)
+// 2. ANALISI SUMMARIZE (Per le Stanze di Gruppo)
 export async function summarizeConversation({ messages, previousSummaries = [], provider, apiKey }: any) {
   const config = AI_PROVIDERS.find(p => p.value === provider) || AI_PROVIDERS[0];
   let model;
@@ -74,12 +74,12 @@ export async function summarizeConversation({ messages, previousSummaries = [], 
   }
 
   const conversationText = messages.map((m: any) => `${m.user}: ${m.content}`).join('\n');
-  const contextLayers = previousSummaries.length > 0 ? `\n\nRIASSUNTI PRECEDENTI:\n${previousSummaries.join('\n---\n')}` : '';
+  const contextLayers = previousSummaries.length > 0 ? `\n\nCONTESTO PRECEDENTE:\n${previousSummaries.join('\n---\n')}` : '';
 
   const { text } = await generateText({
     model,
-    system: "Sei un esperto Startup Coach. Analizza la chat e produci insights tecnici, criticità e una roadmap strategica.",
-    prompt: `Analizza questa sessione di brainstorming.${contextLayers}\n\nNUOVI MESSAGGI:\n${conversationText}`,
+    system: "Sei un esperto Startup Coach. Il tuo compito è analizzare la chat e distillare insights critici, roadmap e analisi di mercato. Sii molto professionale e tecnico.",
+    prompt: `Analizza questa conversazione.${contextLayers}\n\nNUOVI MESSAGGI:\n${conversationText}`,
     temperature: 0.7,
   });
   return text;
