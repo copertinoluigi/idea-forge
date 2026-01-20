@@ -39,7 +39,7 @@ function AppContent() {
       const { data: sums } = await supabase.from('summaries').select('content').in('id', selectedSummaryIds);
       
       const result = await summarizeConversation({
-        messages: pendingMessages.map(m => ({ user: 'Member', content: m.content })),
+        messages: pendingMessages.map(m => ({ user: 'Team Member', content: m.content })),
         previousSummaries: sums?.map(s => s.content) || [],
         provider: room.ai_provider,
         apiKey: room.encrypted_api_key
@@ -54,11 +54,27 @@ function AppContent() {
     } finally { setIsSummarizing(false); setPendingMessages([]); }
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-gray-950"><Loader2 className="h-8 w-8 text-violet-400 animate-spin" /></div>;
+  // FIX: Se sta caricando l'auth O se l'utente c'è ma il profilo non è ancora arrivato, mostra il caricamento.
+  // Questo elimina il flash del Setup.
+  if (loading || (user && !profile)) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-950">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-10 w-10 text-violet-500 animate-spin mx-auto" />
+          <p className="text-gray-500 text-xs font-bold uppercase tracking-widest animate-pulse">Sincronizzazione IdeaForge...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) return authMode === 'login' ? <Login onToggleMode={() => setAuthMode('register')} /> : <Register onToggleMode={() => setAuthMode('login')} />;
+  
   if (!profile?.has_completed_setup) return <Setup />;
+
   if (currentView === 'settings') return <Settings onBack={() => setCurrentView('chat')} />;
-  if (currentView === 'admin') return <AdminDashboard onBack={() => setCurrentView('chat')} />;
+  if (currentView === 'admin' && (user.email === 'info@luigicopertino.it' || user.email === 'unixgigi@gmail.com')) {
+    return <AdminDashboard onBack={() => setCurrentView('chat')} />;
+  }
 
   return (
     <>
@@ -71,7 +87,7 @@ function AppContent() {
         onDevelop={() => setDevelopModalOpen(true)}
       />
       <SummarySidebar isOpen={summarySidebarOpen} roomId={activeRoomId} onClose={() => setSummarySidebarOpen(false)} onGenerate={handleSummarize} loading={isSummarizing} />
-      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => { toast({title: "Deploy avviato"}); setDevelopModalOpen(false); }} />
+      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => { toast({title: "Richiesta inviata all'MCP"}); setDevelopModalOpen(false); }} />
       <Toaster />
     </>
   );
