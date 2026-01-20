@@ -43,10 +43,9 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   useEffect(() => {
     if (!activeRoomId) return;
-    setMessages([]);
     loadMessages(activeRoomId);
 
-    const channel = supabase.channel(`room-isolated-${activeRoomId}`)
+    const channel = supabase.channel(`room-fixed-${activeRoomId}`)
       .on('postgres_changes', { 
         event: 'INSERT', 
         schema: 'public', 
@@ -83,9 +82,10 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
       setRooms(memberRooms);
 
-      // Usiamo last_room_id dal profilo salvato nel DB
-      if (profile?.last_room_id && memberRooms.some(r => r.id === profile.last_room_id)) {
-        onRoomChange(profile.last_room_id);
+      // Usiamo l'ultimo ID stanza salvato nel DB o la Console
+      const savedId = profile?.last_room_id;
+      if (savedId && memberRooms.some(r => r.id === savedId)) {
+        onRoomChange(savedId);
       } else if (privateConsole) {
         onRoomChange(privateConsole.id);
       }
@@ -116,8 +116,14 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     try {
       await supabase.from('messages').insert({ user_id: user.id, content, room_id: currentRoomId });
       const activeR = rooms.find(r => r.id === currentRoomId);
+      
+      // AI RISPONDE SOLO IN CONSOLE PRIVATA
       if (activeR?.is_private) {
-        const reply = await chatWithAI({ messages: [{content}], provider: activeR.ai_provider, apiKey: activeR.encrypted_api_key || profile?.encrypted_api_key || '' });
+        const reply = await chatWithAI({ 
+          messages: [...messages.map(m => ({ content: m.content })), { content }], 
+          provider: activeR.ai_provider, 
+          apiKey: activeR.encrypted_api_key || profile?.encrypted_api_key || '' 
+        });
         await supabase.from('messages').insert({ user_id: user.id, content: reply, room_id: currentRoomId, is_system: true });
       }
     } catch (err: any) { toast({ title: "Errore", description: err.message, variant: "destructive" }); } finally { setLoading(false); }
@@ -129,7 +135,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   return (
     <div className="h-screen flex bg-gray-950 text-white overflow-hidden font-sans text-left">
       <aside className="w-64 border-r border-gray-800 bg-gray-900/50 flex flex-col hidden md:flex">
-        <div className="p-6 text-left">
+        <div className="p-6">
           <div className="flex items-center gap-2 mb-8 justify-center">
             <Sparkles className="h-6 w-6 text-violet-400" />
             <h1 className="font-black text-xl italic uppercase tracking-widest">IdeaForge</h1>
@@ -148,20 +154,20 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </nav>
         </div>
         <div className="mt-auto p-4 border-t border-gray-800 space-y-1 bg-gray-900/10">
-          {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
-          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 font-bold hover:bg-gray-800 hover:text-white"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
-          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
+          {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
+          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 font-bold hover:bg-gray-800 hover:text-white transition-colors"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
+          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300 transition-colors"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
         </div>
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950">
-        <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-6 flex items-center justify-between text-left">
+        <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-6 flex items-center justify-between">
           <div className="flex flex-col">
             <h2 className="font-bold text-sm text-white uppercase tracking-tighter italic">{rooms.find(r => r.id === activeRoomId)?.name || 'Caricamento...'}</h2>
             <span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{rooms.find(r => r.id === activeRoomId)?.ai_provider || 'Engine'} active</span>
           </div>
           <div className="flex items-center gap-3">
-            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600 shadow-lg shadow-violet-900/40'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Conferma (${selectedMessageIds.length})` : 'Summarize'}</Button>
+            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600 shadow-lg shadow-violet-900/40'} text-white rounded-full font-black px-5 transition-all text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Confirm (${selectedMessageIds.length})` : 'Summarize'}</Button>
             <Button onClick={onDevelop} disabled={!rooms.find(r => r.id === activeRoomId)?.mcp_endpoint} size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest shadow-emerald-900/20"><Code className="mr-2 h-3.5 w-3.5" /> Develop</Button>
           </div>
         </header>
