@@ -3,13 +3,13 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 
-export type AIProvider = 'google' | 'openai' | 'anthropic';
+export type AIProviderValue = 'google-flash' | 'google-pro' | 'openai-4' | 'openai-4o' | 'anthropic-sonnet';
 
 export const AI_PROVIDERS = [
-  { value: 'google-flash', label: 'Gemini 1.5 Flash', model: 'gemini-1.5-flash', provider: 'google' },
-  { value: 'google-pro', label: 'Gemini 1.5 Pro', model: 'gemini-1.5-pro', provider: 'google' },
-  { value: 'openai-4', label: 'GPT-4 Turbo', model: 'gpt-4-turbo', provider: 'openai' },
-  { value: 'openai-4o', label: 'GPT-4o', model: 'gpt-4o', provider: 'openai' },
+  { value: 'google-flash', label: 'Gemini 1.5 Flash (Veloce)', model: 'gemini-1.5-flash', provider: 'google' },
+  { value: 'google-pro', label: 'Gemini 1.5 Pro (Intelligente)', model: 'gemini-1.5-pro', provider: 'google' },
+  { value: 'openai-4o', label: 'GPT-4o (Bilanciato)', model: 'gpt-4o', provider: 'openai' },
+  { value: 'openai-4', label: 'GPT-4 Turbo (Preciso)', model: 'gpt-4-turbo', provider: 'openai' },
   { value: 'anthropic-sonnet', label: 'Claude 3.5 Sonnet', model: 'claude-3-5-sonnet-20241022', provider: 'anthropic' },
 ] as const;
 
@@ -22,7 +22,7 @@ Struttura la risposta in:
 interface SummarizeParams {
   messages: Array<{ user: string; content: string }>;
   previousSummaries?: string[];
-  provider: AIProvider;
+  provider: string; // Il valore salvato nel DB (es: 'google-flash')
   apiKey: string;
 }
 
@@ -39,20 +39,33 @@ export async function summarizeConversation({
 
   const userPrompt = `Analizza questa conversazione.${contextLayers}\n\nNUOVI MESSAGGI:\n${conversationText}`;
 
+  // Troviamo il modello corretto in base al valore salvato nel DB
+  const config = AI_PROVIDERS.find(p => p.value === provider) || AI_PROVIDERS[0];
+  
   let model;
-  switch (provider) {
-    case 'google': model = createGoogleGenerativeAI({ apiKey })('gemini-1.5-flash'); break;
-    case 'openai': model = createOpenAI({ apiKey })('gpt-4-turbo'); break;
-    case 'anthropic': model = createAnthropic({ apiKey })('claude-3-5-sonnet-20241022'); break;
-    default: throw new Error(`Provider non supportato: ${provider}`);
+  switch (config.provider) {
+    case 'google':
+      model = createGoogleGenerativeAI({ apiKey })(config.model);
+      break;
+    case 'openai':
+      model = createOpenAI({ apiKey })(config.model);
+      break;
+    case 'anthropic':
+      model = createAnthropic({ apiKey })(config.model);
+      break;
+    default:
+      throw new Error(`Provider non supportato: ${config.provider}`);
   }
 
-  const { text } = await generateText({
-    model,
-    system: SYSTEM_PROMPT,
-    prompt: userPrompt,
-    temperature: 0.7,
-  });
-
-  return text;
+  try {
+    const { text } = await generateText({
+      model,
+      system: SYSTEM_PROMPT,
+      prompt: userPrompt,
+      temperature: 0.7,
+    });
+    return text;
+  } catch (error: any) {
+    throw new Error(`Generazione fallita: ${error.message}`);
+  }
 }
