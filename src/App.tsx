@@ -18,6 +18,7 @@ function AppContent() {
   const { user, profile, loading } = useAuth();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [currentView, setCurrentView] = useState<'chat' | 'settings' | 'admin'>('chat');
+  
   const [summarySidebarOpen, setSummarySidebarOpen] = useState(false);
   const [developModalOpen, setDevelopModalOpen] = useState(false);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
@@ -27,7 +28,7 @@ function AppContent() {
 
   const handleRoomChange = (id: string) => {
     setActiveRoomId(id);
-    // Persistenza opzionale lato DB già gestita in Chat.tsx
+    localStorage.setItem('lastActiveRoomId', id);
   };
 
   const handleSummarize = async (selectedSummaryIds: string[]) => {
@@ -49,28 +50,28 @@ function AppContent() {
       toast({ title: "Analisi completata" });
       setSummarySidebarOpen(false);
     } catch (err: any) {
-      toast({ title: "Errore", description: err.message, variant: "destructive" });
+      toast({ title: "Errore AI", description: err.message, variant: "destructive" });
     } finally {
       setIsSummarizing(false);
       setPendingMessages([]);
     }
   };
 
-  // --- LOGICA DI RENDERING FAIL-SAFE ---
-  
-  // 1. Se l'Auth è ancora in caricamento totale, mostra il loader
+  // --- RENDERING STRATEGICO ---
+
+  // 1. Caricamento AUTH (Sessione Supabase)
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-950">
+      <div className="h-screen flex items-center justify-center bg-gray-950 text-white">
         <div className="text-center space-y-4">
           <Loader2 className="h-10 w-10 text-violet-500 animate-spin mx-auto" />
-          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em] animate-pulse">IdeaForge Booting...</p>
+          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em]">IdeaForge Booting...</p>
         </div>
       </div>
     );
   }
 
-  // 2. Se non c'è l'utente, vai a Login/Register
+  // 2. Utente non loggato
   if (!user) {
     return authMode === 'login' ? (
       <Login onToggleMode={() => setAuthMode('register')} />
@@ -79,16 +80,19 @@ function AppContent() {
     );
   }
 
-  // 3. Se l'utente c'è ma il profilo non è ancora arrivato (latenza DB), attendi brevemente
+  // 3. Utente loggato ma PROFILO ancora in caricamento dal DB
   if (!profile) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-950">
-        <Loader2 className="h-8 w-8 text-violet-500 animate-spin" />
+      <div className="h-screen flex items-center justify-center bg-gray-950 text-white">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 text-violet-400 animate-spin mx-auto" />
+          <p className="text-gray-500 text-[10px] font-black tracking-widest animate-pulse">Sincronizzazione Profilo...</p>
+        </div>
       </div>
     );
   }
 
-  // 4. Se il profilo c'è ma il setup non è fatto
+  // 4. Setup obbligatorio
   if (profile.has_completed_setup === false) {
     return <Setup />;
   }
@@ -99,7 +103,7 @@ function AppContent() {
     return <AdminDashboard onBack={() => setCurrentView('chat')} />;
   }
 
-  // 6. Vista Chat Principale
+  // 6. Chat Principale
   return (
     <>
       <Chat
