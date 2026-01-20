@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { AI_PROVIDERS, type AIProvider } from '@/lib/ai-service';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Plus, LogIn, Sparkles, Users, Server, ArrowLeft, Key } from 'lucide-react';
+import { Loader2, Plus, LogIn, Sparkles, Users, Server, ArrowLeft } from 'lucide-react';
 
 interface AddRoomModalProps {
   isOpen: boolean;
@@ -45,6 +45,7 @@ export function AddRoomModal({ isOpen, onClose, onSuccess }: AddRoomModalProps) 
     if (!user || !name.trim()) return;
     setLoading(true);
     try {
+      // 1. Crea la stanza
       const { data: room, error: rErr } = await supabase.from('rooms').insert({
         name: name.trim(),
         ai_provider: aiProvider,
@@ -56,6 +57,7 @@ export function AddRoomModal({ isOpen, onClose, onSuccess }: AddRoomModalProps) 
 
       if (rErr) throw rErr;
 
+      // 2. Prepara i membri
       const membersToInsert: any[] = [
         { room_id: room.id, user_email: user.email, role: 'owner', user_id: user.id }
       ];
@@ -73,7 +75,7 @@ export function AddRoomModal({ isOpen, onClose, onSuccess }: AddRoomModalProps) 
       onSuccess();
       resetAndClose();
     } catch (err: any) {
-      toast({ title: "Errore", description: err.message, variant: "destructive" });
+      toast({ title: "Errore Creazione", description: err.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -84,8 +86,8 @@ export function AddRoomModal({ isOpen, onClose, onSuccess }: AddRoomModalProps) 
     if (!user || !joinCode.trim()) return;
     setLoading(true);
     try {
-      const { data: room, error: rErr } = await supabase.from('rooms').select('id').eq('join_code', joinCode.trim()).single();
-      if (rErr) throw new Error("Codice stanza non trovato o non valido.");
+      const { data: room, error: rErr } = await supabase.from('rooms').select('id').eq('join_code', joinCode.trim()).maybeSingle();
+      if (!room) throw new Error("Codice stanza non trovato o non valido.");
 
       const { error: mErr } = await supabase.from('room_members').insert({
         room_id: room.id,
@@ -118,7 +120,7 @@ export function AddRoomModal({ isOpen, onClose, onSuccess }: AddRoomModalProps) 
             <DialogTitle className="text-xl font-bold italic tracking-tighter uppercase">Gestione Stanze</DialogTitle>
           </div>
           <DialogDescription className="text-gray-400 text-xs text-left">
-            Crea un nuovo spazio creativo o unisciti a un progetto esistente.
+            Crea un nuovo spazio creativo o unisciti a un progetto esistente per collaborare con il tuo team.
           </DialogDescription>
         </DialogHeader>
 
@@ -128,14 +130,14 @@ export function AddRoomModal({ isOpen, onClose, onSuccess }: AddRoomModalProps) 
               <Plus className="h-10 w-10 text-violet-400 group-hover:scale-110 transition-transform" />
               <div className="text-center">
                 <span className="block font-bold">Crea Nuova</span>
-                <span className="text-[10px] text-gray-500">Inizia da zero</span>
+                <span className="text-[10px] text-gray-500">Inizia un nuovo brainstorming</span>
               </div>
             </Button>
             <Button onClick={() => setMode('join')} className="h-40 flex flex-col gap-3 bg-emerald-600/10 border-emerald-600/30 border hover:bg-emerald-600/20 transition-all group">
               <LogIn className="h-10 w-10 text-emerald-400 group-hover:scale-110 transition-transform" />
               <div className="text-center">
                 <span className="block font-bold">Unisciti</span>
-                <span className="text-[10px] text-gray-500">Inserisci codice</span>
+                <span className="text-[10px] text-gray-500">Usa un codice d'accesso</span>
               </div>
             </Button>
           </div>
@@ -145,8 +147,9 @@ export function AddRoomModal({ isOpen, onClose, onSuccess }: AddRoomModalProps) 
           <form onSubmit={handleCreate} className="space-y-4 animate-in fade-in zoom-in duration-200">
             <div className="space-y-2">
               <Label className="text-[10px] uppercase font-black text-gray-500 tracking-widest">Nome Stanza</Label>
-              <Input value={name} onChange={e => setName(e.target.value)} placeholder="es. Startup Alpha" className="bg-gray-900 border-gray-800" required />
+              <Input value={name} onChange={e => setName(e.target.value)} placeholder="es. Startup Alpha" className="bg-gray-900 border-gray-800 focus:ring-violet-500" required />
             </div>
+            
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label className="text-[10px] uppercase font-black text-gray-500 tracking-widest">AI Brain</Label>
@@ -159,34 +162,57 @@ export function AddRoomModal({ isOpen, onClose, onSuccess }: AddRoomModalProps) 
               </div>
               <div className="space-y-2">
                 <Label className="text-[10px] uppercase font-black text-gray-500 tracking-widest">API Key</Label>
-                <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-..." className="bg-gray-900 border-gray-800" required />
+                <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-..." className="bg-gray-900 border-gray-800 focus:ring-violet-500" required />
               </div>
             </div>
+
             <div className="space-y-2">
-              <Label className="text-[10px] uppercase font-black text-gray-500 tracking-widest flex items-center gap-2"><Server className="h-3 w-3 text-emerald-500"/> Endpoint MCP (VPS)</Label>
-              <Input value={mcpEndpoint} onChange={e => setMcpEndpoint(e.target.value)} placeholder="https://vps-mcp.com/api" className="bg-gray-900 border-gray-800" required />
+              <Label className="text-[10px] uppercase font-black text-gray-500 tracking-widest flex items-center gap-2">
+                <Server className="h-3 w-3 text-emerald-500"/> Endpoint MCP (VPS)
+              </Label>
+              <Input value={mcpEndpoint} onChange={e => setMcpEndpoint(e.target.value)} placeholder="https://vps-mcp.com/api" className="bg-gray-900 border-gray-800 focus:ring-violet-500" required />
             </div>
+
             <div className="space-y-2">
-              <Label className="text-[10px] uppercase font-black text-gray-500 tracking-widest flex items-center gap-2"><Users className="h-3 w-3 text-violet-500"/> Team (Emails)</Label>
-              <Input value={emails} onChange={e => setEmails(e.target.value)} placeholder="socio@email.com, dev@email.com" className="bg-gray-900 border-gray-800" />
-              <p className="text-[9px] text-gray-600">Separa le email con una virgola.</p>
+              <Label className="text-[10px] uppercase font-black text-gray-500 tracking-widest flex items-center gap-2">
+                <Users className="h-3 w-3 text-violet-500"/> Team (Emails)
+              </Label>
+              <Input value={emails} onChange={e => setEmails(e.target.value)} placeholder="socio@email.com, dev@email.com" className="bg-gray-900 border-gray-800 focus:ring-violet-500" />
+              <p className="text-[9px] text-gray-600">Separa gli indirizzi email con una virgola.</p>
             </div>
-            <DialogFooter className="flex-col gap-2">
-              <Button type="submit" disabled={loading} className="w-full bg-violet-600 font-bold uppercase">{loading ? <Loader2 className="animate-spin" /> : "Attiva Incubatore"}</Button>
-              <Button variant="ghost" type="button" onClick={() => setMode('choice')} className="w-full text-xs text-gray-500"><ArrowLeft className="h-3 w-3 mr-2"/> Torna alla scelta</Button>
+
+            <DialogFooter className="flex-col gap-2 sm:flex-col">
+              <Button type="submit" disabled={loading} className="w-full bg-violet-600 hover:bg-violet-500 font-bold uppercase py-6">
+                {loading ? <Loader2 className="animate-spin mr-2 h-5 w-5" /> : "Attiva Incubatore"}
+              </Button>
+              <Button variant="ghost" type="button" onClick={() => setMode('choice')} className="w-full text-xs text-gray-500 hover:text-white">
+                <ArrowLeft className="h-3 w-3 mr-2"/> Torna alla scelta iniziale
+              </Button>
             </DialogFooter>
           </form>
         )}
 
         {mode === 'join' && (
           <form onSubmit={handleJoin} className="space-y-6 animate-in fade-in zoom-in duration-200">
-            <div className="space-y-2">
-              <Label className="text-[10px] uppercase font-black text-gray-500 tracking-widest">Codice d'accesso</Label>
-              <Input value={joinCode} onChange={e => setJoinCode(e.target.value)} placeholder="Inserisci il codice a 8 cifre" className="bg-gray-900 border-gray-800 text-center text-lg font-mono tracking-widest" required />
+            <div className="space-y-4 py-4">
+              <Label className="text-[10px] uppercase font-black text-gray-500 tracking-widest text-center block">Codice d'accesso univoco</Label>
+              <Input 
+                value={joinCode} 
+                onChange={e => setJoinCode(e.target.value)} 
+                placeholder="ABC123XY" 
+                className="bg-gray-900 border-gray-800 text-center text-2xl font-black tracking-[0.5em] h-16 uppercase focus:ring-emerald-500" 
+                required 
+              />
+              <p className="text-[10px] text-gray-500 text-center italic">Inserisci il codice ricevuto dal creatore della stanza.</p>
             </div>
-            <DialogFooter className="flex-col gap-2">
-              <Button type="submit" disabled={loading} className="w-full bg-emerald-600 font-bold uppercase">{loading ? <Loader2 className="animate-spin" /> : "Unisciti al Brainstorming"}</Button>
-              <Button variant="ghost" type="button" onClick={() => setMode('choice')} className="w-full text-xs text-gray-500"><ArrowLeft className="h-3 w-3 mr-2"/> Torna alla scelta</Button>
+            
+            <DialogFooter className="flex-col gap-2 sm:flex-col">
+              <Button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 font-bold uppercase py-6">
+                {loading ? <Loader2 className="animate-spin mr-2 h-5 w-5" /> : "Unisciti al Brainstorming"}
+              </Button>
+              <Button variant="ghost" type="button" onClick={() => setMode('choice')} className="w-full text-xs text-gray-500 hover:text-white">
+                <ArrowLeft className="h-3 w-3 mr-2"/> Torna alla scelta iniziale
+              </Button>
             </DialogFooter>
           </form>
         )}
