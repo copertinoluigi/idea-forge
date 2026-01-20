@@ -6,9 +6,11 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 export type AIProvider = 'google' | 'openai' | 'anthropic';
 
 export const AI_PROVIDERS = [
-  { value: 'google', label: 'Google Gemini', model: 'Gemini 1.5 Flash' },
-  { value: 'openai', label: 'OpenAI', model: 'GPT-4 Turbo' },
-  { value: 'anthropic', label: 'Anthropic', model: 'Claude 3.5 Sonnet' },
+  { value: 'google-flash', label: 'Gemini 1.5 Flash', model: 'gemini-1.5-flash', provider: 'google' },
+  { value: 'google-pro', label: 'Gemini 1.5 Pro', model: 'gemini-1.5-pro', provider: 'google' },
+  { value: 'openai-4', label: 'GPT-4 Turbo', model: 'gpt-4-turbo', provider: 'openai' },
+  { value: 'openai-4o', label: 'GPT-4o', model: 'gpt-4o', provider: 'openai' },
+  { value: 'anthropic-sonnet', label: 'Claude 3.5 Sonnet', model: 'claude-3-5-sonnet-20241022', provider: 'anthropic' },
 ] as const;
 
 const SYSTEM_PROMPT = `Sei un esperto Startup Coach e Product Manager. Il tuo compito è analizzare frammenti di conversazione e riassunti precedenti per distillare l'evoluzione di un'idea.
