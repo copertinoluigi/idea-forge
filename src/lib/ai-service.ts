@@ -32,10 +32,11 @@ async function getDynamicGeminiModel(apiKey: string, type: 'flash' | 'pro'): Pro
   } catch (e) { return type === 'flash' ? "gemini-1.5-flash" : "gemini-1.5-pro"; }
 }
 
-// FUNZIONE PER CHAT NORMALE (CONSOLLE PRIVATA)
+// 1. FUNZIONE PER CHAT PRIVATA (INTERAZIONE CONTINUA)
 export async function chatWithAI({ messages, provider, apiKey }: { messages: any[], provider: string, apiKey: string }) {
   const config = AI_PROVIDERS.find(p => p.value === provider) || AI_PROVIDERS[0];
   let model;
+
   if (config.provider === 'google') {
     const dynamicName = await getDynamicGeminiModel(apiKey, config.model as 'flash' | 'pro');
     model = createGoogleGenerativeAI({ apiKey })(dynamicName);
@@ -45,19 +46,23 @@ export async function chatWithAI({ messages, provider, apiKey }: { messages: any
     model = createAnthropic({ apiKey })(config.model);
   }
 
+  // Prendiamo gli ultimi 10 messaggi per dare memoria alla chat
+  const chatContext = messages.slice(-10).map(m => `${m.role === 'user' ? 'Utente' : 'Assistente'}: ${m.content}`).join('\n');
+
   const { text } = await generateText({
     model,
-    system: "Sei un assistente AI utile e versatile. Rispondi in modo colloquiale, fornisci consigli di coding, informazioni generali e interagisci in base alle richieste dell'utente.",
-    prompt: messages[messages.length - 1].content,
+    system: "Sei un assistente AI esperto e amichevole. Puoi scrivere codice, dare consigli e chiacchierare. Rispondi in modo diretto.",
+    prompt: `Ecco la cronologia recente:\n${chatContext}\n\nRispondi all'ultimo messaggio dell'utente.`,
     temperature: 0.8,
   });
   return text;
 }
 
-// FUNZIONE PER SUMMARIZE (INCUBATORE)
+// 2. FUNZIONE PER SUMMARIZE (DORMIENTE NELLE STANZE, SI ATTIVA SOLO SU COMANDO)
 export async function summarizeConversation({ messages, previousSummaries = [], provider, apiKey }: any) {
   const config = AI_PROVIDERS.find(p => p.value === provider) || AI_PROVIDERS[0];
   let model;
+
   if (config.provider === 'google') {
     const dynamicName = await getDynamicGeminiModel(apiKey, config.model as 'flash' | 'pro');
     model = createGoogleGenerativeAI({ apiKey })(dynamicName);
@@ -72,8 +77,8 @@ export async function summarizeConversation({ messages, previousSummaries = [], 
 
   const { text } = await generateText({
     model,
-    system: "Sei un esperto Startup Coach. Il tuo compito è analizzare la chat e distillare insights critici, roadmap e analisi di mercato.",
-    prompt: `Analizza questa conversazione.${contextLayers}\n\nNUOVI MESSAGGI:\n${conversationText}`,
+    system: "Sei un esperto Startup Coach. Analizza la discussione e produci un'analisi critica e una roadmap strategica.",
+    prompt: `Analizza questa sessione di brainstorming.${contextLayers}\n\nNUOVI MESSAGGI:\n${conversationText}`,
     temperature: 0.7,
   });
   return text;
