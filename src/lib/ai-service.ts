@@ -3,15 +3,22 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 
-export type AIProviderValue = 'google-flash' | 'google-pro' | 'openai-4' | 'openai-4o' | 'anthropic-sonnet';
+export type AIProvider = 'google-flash' | 'google-pro' | 'openai-4' | 'openai-4o' | 'anthropic-sonnet';
 
-export const AI_PROVIDERS = [
+export interface AIConfig {
+  value: AIProvider;
+  label: string;
+  model: string;
+  provider: 'google' | 'openai' | 'anthropic';
+}
+
+export const AI_PROVIDERS: AIConfig[] = [
   { value: 'google-flash', label: 'Gemini 1.5 Flash (Veloce)', model: 'gemini-1.5-flash', provider: 'google' },
   { value: 'google-pro', label: 'Gemini 1.5 Pro (Intelligente)', model: 'gemini-1.5-pro', provider: 'google' },
   { value: 'openai-4o', label: 'GPT-4o (Bilanciato)', model: 'gpt-4o', provider: 'openai' },
   { value: 'openai-4', label: 'GPT-4 Turbo (Preciso)', model: 'gpt-4-turbo', provider: 'openai' },
   { value: 'anthropic-sonnet', label: 'Claude 3.5 Sonnet', model: 'claude-3-5-sonnet-20241022', provider: 'anthropic' },
-] as const;
+];
 
 const SYSTEM_PROMPT = `Sei un esperto Startup Coach e Product Manager. Il tuo compito è analizzare frammenti di conversazione e riassunti precedenti per distillare l'evoluzione di un'idea.
 Struttura la risposta in:
@@ -22,7 +29,7 @@ Struttura la risposta in:
 interface SummarizeParams {
   messages: Array<{ user: string; content: string }>;
   previousSummaries?: string[];
-  provider: string; // Il valore salvato nel DB (es: 'google-flash')
+  provider: string;
   apiKey: string;
 }
 
@@ -39,7 +46,6 @@ export async function summarizeConversation({
 
   const userPrompt = `Analizza questa conversazione.${contextLayers}\n\nNUOVI MESSAGGI:\n${conversationText}`;
 
-  // Troviamo il modello corretto in base al valore salvato nel DB
   const config = AI_PROVIDERS.find(p => p.value === provider) || AI_PROVIDERS[0];
   
   let model;
@@ -54,7 +60,7 @@ export async function summarizeConversation({
       model = createAnthropic({ apiKey })(config.model);
       break;
     default:
-      throw new Error(`Provider non supportato: ${config.provider}`);
+      throw new Error(`Provider non supportato`);
   }
 
   try {
