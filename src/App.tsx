@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { Login } from '@/pages/Login';
 import { Register } from '@/pages/Register';
@@ -19,11 +19,8 @@ function AppContent() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [currentView, setCurrentView] = useState<'chat' | 'settings' | 'admin'>('chat');
   
-  // Modals & Sidebars
   const [summarySidebarOpen, setSummarySidebarOpen] = useState(false);
   const [developModalOpen, setDevelopModalOpen] = useState(false);
-  
-  // State per la logica Multi-Stanza e Summarize
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [pendingMessages, setPendingMessages] = useState<any[]>([]);
@@ -31,63 +28,27 @@ function AppContent() {
   const { toast } = useToast();
 
   const handleSummarize = async (selectedSummaryIds: string[]) => {
-    if (!activeRoomId || pendingMessages.length === 0) {
-      toast({ title: "Attenzione", description: "Seleziona i messaggi e assicurati di essere in una stanza.", variant: "destructive" });
-      return;
-    }
-
+    if (!activeRoomId || pendingMessages.length === 0) return;
     setIsSummarizing(true);
     try {
-      const { data: room, error: roomError } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('id', activeRoomId)
-        .single();
+      const { data: room } = await supabase.from('rooms').select('*').eq('id', activeRoomId).single();
+      if (!room?.encrypted_api_key) throw new Error("API Key mancante per questa stanza");
 
-      if (roomError || !room?.encrypted_api_key) {
-        throw new Error("API Key non trovata per questa stanza.");
-      }
-
-      let previousLayers: string[] = [];
-      if (selectedSummaryIds.length > 0) {
-        const { data: sums } = await supabase
-          .from('summaries')
-          .select('content')
-          .in('id', selectedSummaryIds);
-        previousLayers = sums?.map(s => s.content) || [];
-      }
-
-      const formattedMsgs = pendingMessages.map(m => ({
-        user: 'Team Member',
-        content: m.content
-      }));
-
+      const { data: sums } = await supabase.from('summaries').select('content').in('id', selectedSummaryIds);
+      
       const result = await summarizeConversation({
-        messages: formattedMsgs,
-        previousSummaries: previousLayers,
+        messages: pendingMessages.map(m => ({ user: 'Member', content: m.content })),
+        previousSummaries: sums?.map(s => s.content) || [],
         provider: room.ai_provider as any,
         apiKey: room.encrypted_api_key
       });
 
-      const timestamp = new Date().toLocaleString('it-IT', { 
-        day: '2-digit', month: '2-digit', year: 'numeric', 
-        hour: '2-digit', minute: '2-digit' 
-      });
+      const timestamp = new Date().toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+      await supabase.from('summaries').insert({ room_id: activeRoomId, title: `Summary ${timestamp}`, content: result });
       
-      const { error: saveError } = await supabase
-        .from('summaries')
-        .insert({
-          room_id: activeRoomId,
-          title: `Summary ${timestamp}`,
-          content: result
-        });
-
-      if (saveError) throw saveError;
-
-      toast({ title: "Analisi completata", description: "Nuovo snapshot salvato." });
+      toast({ title: "Analisi completata" });
       setSummarySidebarOpen(false);
       setPendingMessages([]);
-
     } catch (err: any) {
       toast({ title: "Errore AI", description: err.message, variant: "destructive" });
     } finally {
@@ -98,8 +59,10 @@ function AppContent() {
   if (loading) return <div className="h-screen flex items-center justify-center bg-gray-950"><Loader2 className="h-8 w-8 text-violet-400 animate-spin" /></div>;
   if (!user) return authMode === 'login' ? <Login onToggleMode={() => setAuthMode('register')} /> : <Register onToggleMode={() => setAuthMode('login')} />;
   if (!profile?.has_completed_setup) return <Setup />;
+
+  // ROUTER LOGIC
   if (currentView === 'settings') return <Settings onBack={() => setCurrentView('chat')} />;
-  if (currentView === 'admin' && user.email === 'info@luigicopertino.it') return <AdminDashboard onBack={() => setCurrentView('chat')} />;
+  if (currentView === 'admin') return <AdminDashboard onBack={() => setCurrentView('chat')} />;
 
   return (
     <>
@@ -108,12 +71,13 @@ function AppContent() {
         onRoomChange={setActiveRoomId}
         onNavigateToSettings={() => setCurrentView('settings')}
         onNavigateToAdmin={() => setCurrentView('admin')}
-        onSummarize={(selectedMessages) => {
-          setPendingMessages(selectedMessages);
+        onSummarize={(messages) => {
+          setPendingMessages(messages);
           setSummarySidebarOpen(true);
         }}
         onDevelop={() => setDevelopModalOpen(true)}
       />
+
       <SummarySidebar
         isOpen={summarySidebarOpen}
         roomId={activeRoomId}
@@ -121,11 +85,26 @@ function AppContent() {
         onGenerate={handleSummarize}
         loading={isSummarizing}
       />
-      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => {}} />
+
+      <DevelopModal
+        isOpen={developModalOpen}
+        onClose={() => setDevelopModalOpen(false)}
+        onDevelop={async () => {
+          toast({ title: "Sviluppo avviato" });
+          setDevelopModalOpen(false);
+        }}
+      />
       <Toaster />
     </>
   );
 }
 
-function App() { return <AuthProvider><AppContent /></AuthProvider>; }
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}
+
 export default App;
