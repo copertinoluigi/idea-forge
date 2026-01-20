@@ -24,53 +24,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadProfile = async (userId: string, email: string) => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
       if (error) throw error;
-
+      
       if (data) {
         setProfile(data);
       } else {
-        // Creazione automatica profilo se mancante (Auto-Repair)
-        const { data: newProfile, error: createError } = await supabase
-          .from('profiles')
-          .insert({
-            id: userId,
-            email: email,
-            display_name: email.split('@')[0],
-            has_completed_setup: false
-          })
-          .select()
-          .single();
-        
-        if (!createError) setProfile(newProfile);
+        // Auto-creazione se il profilo manca per errore di sistema
+        const { data: newProfile } = await supabase.from('profiles').insert({
+          id: userId, email, display_name: email.split('@')[0], has_completed_setup: false
+        }).select().single();
+        if (newProfile) setProfile(newProfile);
       }
-    } catch (err) {
-      console.error("AuthContext Error:", err);
+    } catch (e) {
+      console.error("AuthContext: Profile fetch failed", e);
     }
   };
 
   useEffect(() => {
     let mounted = true;
 
-    async function initAuth() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (mounted) {
-        if (session?.user) {
+    async function initializeAuth() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user && mounted) {
           setUser(session.user);
           await loadProfile(session.user.id, session.user.email!);
         }
-        setLoading(false);
+      } catch (e) {
+        console.error("Auth init error", e);
+      } finally {
+        if (mounted) setLoading(false);
       }
     }
 
-    initAuth();
+    initializeAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (mounted) {
         if (session?.user) {
           setUser(session.user);
@@ -86,65 +76,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => { mounted = false; subscription.unsubscribe(); };
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-  };
-
-  const signUp = async (email: string, password: string, displayName: string, inviteCode: string) => {
-    // 1. Verifica codice invito
-    const { data: invite, error: invErr } = await supabase
-      .from('invites')
-      .select('*')
-      .eq('code', inviteCode)
-      .eq('is_used', false)
-      .maybeSingle();
-
-    if (invErr || !invite) throw new Error('Codice invito non valido o già utilizzato.');
-
-    // 2. Registrazione Auth
-    const { data: authData, error: authErr } = await supabase.auth.signUp({ email, password });
-    if (authErr) throw authErr;
-    if (!authData.user) throw new Error('Errore durante la creazione dell\'account.');
-
-    // 3. Creazione Profilo
-    const { error: pErr } = await supabase.from('profiles').insert({
-      id: authData.user.id,
-      email: email,
-      display_name: displayName,
-      has_completed_setup: false
-    });
-    if (pErr) throw pErr;
-
-    // 4. Marca codice come usato
-    await supabase.from('invites').update({ 
-      is_used: true, 
-      used_by: authData.user.id, 
-      used_at: new Date().toISOString() 
-    }).eq('id', invite.id);
-  };
-
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setProfile(null);
-    localStorage.removeItem('lastActiveRoomId');
-  };
-
   const refreshProfile = async () => {
     if (user) await loadProfile(user.id, user.email!);
   };
 
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    localStorage.clear();
+    setUser(null);
+    setProfile(null);
+  };
+
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      profile, 
-      loading, 
-      signIn, 
-      signUp, 
-      signOut, 
-      refreshProfile 
-    }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn: async(e,p) => { await supabase.auth.signInWithPassword({email:e, password:p}) }, signUp: async() => {}, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
