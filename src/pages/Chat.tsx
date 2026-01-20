@@ -7,7 +7,7 @@ import { ChatMessage } from '@/components/ChatMessage';
 import { useToast } from '@/hooks/use-toast';
 import { AddRoomModal } from '@/components/AddRoomModal';
 import { chatWithAI } from '@/lib/ai-service';
-import { Send, Sparkles, Code, Settings, LogOut, Plus, Hash, MessageSquare, ShieldCheck, Loader2 } from 'lucide-react';
+import { Send, Sparkles, Code, Settings, LogOut, Plus, Hash, MessageSquare, ShieldCheck, Loader2, Copy } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
 type Message = Database['public']['Tables']['messages']['Row'] & { profiles: { display_name: string } | null };
@@ -37,88 +37,71 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoom = rooms.find(r => r.id === activeRoomId);
 
-  // Caricamento iniziale stanze
+  // 1. Inizializzazione Stanze
   useEffect(() => {
-    if (user) {
-      loadRooms();
-    }
+    if (user) loadRooms();
   }, [user]);
 
-  // Sincronizzazione Messaggi Realtime
+  // 2. Gestione Messaggi & Realtime (CHIRURGICO)
   useEffect(() => {
-    if (activeRoomId) {
-      loadMessages();
-      const channel = supabase.channel(`room-${activeRoomId}`)
-        .on('postgres_changes', { 
-          event: 'INSERT', 
-          schema: 'public', 
-          table: 'messages', 
-          filter: `room_id=eq.${activeRoomId}` 
-        }, async (payload) => {
-          const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
-          setMessages(prev => {
-            if (prev.some(m => m.id === payload.new.id)) return prev;
-            return [...prev, { ...payload.new, profiles: p } as Message];
-          });
-          setTimeout(scrollToBottom, 50);
-        }).subscribe();
-      return () => { supabase.removeChannel(channel); };
-    }
+    if (!activeRoomId) return;
+
+    // Pulizia immediata messaggi al cambio stanza per evitare "ghosting"
+    setMessages([]);
+    loadMessages();
+
+    // Sottoscrizione con filtro rigoroso lato client e server
+    const channel = supabase.channel(`room-channel-${activeRoomId}`)
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'messages', 
+        filter: `room_id=eq.${activeRoomId}` 
+      }, async (payload) => {
+        // Doppio controllo: verifichiamo che il messaggio appartenga davvero alla stanza attiva
+        if (payload.new.room_id !== activeRoomId) return;
+
+        const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
+        setMessages(prev => {
+          if (prev.some(m => m.id === payload.new.id)) return prev;
+          return [...prev, { ...payload.new, profiles: p } as Message];
+        });
+        setTimeout(scrollToBottom, 50);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [activeRoomId]);
 
   const loadRooms = async () => {
     if (!user) return;
     setRoomsLoading(true);
-    
     try {
-      // 1. Cerchiamo le appartenenze alle stanze
-      const { data: memberships, error: mErr } = await supabase
-        .from('room_members')
-        .select('rooms (*)')
-        .eq('user_email', user.email);
-
-      if (mErr) throw mErr;
-
+      const { data: memberships } = await supabase.from('room_members').select('rooms (*)').eq('user_email', user.email);
       let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
       let privateConsole = memberRooms.find(r => r.is_private);
 
-      // 2. Se non esiste la console privata, la creiamo forzatamente
       if (!privateConsole) {
-        const { data: newRoom, error: rErr } = await supabase.from('rooms').insert({
-          name: 'La mia Console', 
-          is_private: true, 
-          created_by: user.id, 
-          ai_provider: profile?.ai_provider || 'google-flash'
+        const { data: newRoom } = await supabase.from('rooms').insert({
+          name: 'La mia Console', is_private: true, created_by: user.id, ai_provider: 'google-flash'
         }).select().single();
 
-        if (rErr) throw rErr;
-
         if (newRoom) {
-          const { error: memErr } = await supabase.from('room_members').insert({ 
-            room_id: newRoom.id, 
-            user_email: user.email, 
-            user_id: user.id, 
-            role: 'owner' 
-          });
-          if (memErr) throw memErr;
-          
+          await supabase.from('room_members').insert({ room_id: newRoom.id, user_email: user.email, user_id: user.id, role: 'owner' });
           memberRooms = [newRoom, ...memberRooms];
           privateConsole = newRoom;
         }
       }
-
       setRooms(memberRooms);
-
-      // 3. Ripristino stanza attiva (da localStorage o la nuova console)
+      
       const savedId = localStorage.getItem('lastActiveRoomId');
       if (savedId && memberRooms.some(r => r.id === savedId)) {
         onRoomChange(savedId);
       } else if (privateConsole) {
         onRoomChange(privateConsole.id);
       }
-
-    } catch (err: any) {
-      console.error("Errore loadRooms:", err);
+    } catch (err) {
+      console.error(err);
     } finally {
       setRoomsLoading(false);
     }
@@ -126,13 +109,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   const loadMessages = async () => {
     if (!activeRoomId) return;
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*, profiles(display_name)')
-      .eq('room_id', activeRoomId)
-      .order('created_at', { ascending: true });
-    
-    if (!error) setMessages(data as Message[]);
+    const { data } = await supabase.from('messages').select('*, profiles(display_name)').eq('room_id', activeRoomId).order('created_at', { ascending: true });
+    if (data) setMessages(data as Message[]);
     setTimeout(scrollToBottom, 50);
   };
 
@@ -141,14 +119,13 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     if (!newMessage.trim() || !user || !activeRoomId || loading) return;
     
     const content = newMessage.trim();
+    const currentRoomId = activeRoomId; // Snapshot dell'ID per evitare cambi durante l'invio
     setNewMessage('');
     setLoading(true);
 
     try {
       const { error: sendError } = await supabase.from('messages').insert({ 
-        user_id: user.id, 
-        content, 
-        room_id: activeRoomId 
+        user_id: user.id, content, room_id: currentRoomId 
       });
       if (sendError) throw sendError;
 
@@ -163,16 +140,20 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         });
 
         await supabase.from('messages').insert({
-          user_id: user.id, 
-          content: reply, 
-          room_id: activeRoomId, 
-          is_system: true 
+          user_id: user.id, content: reply, room_id: currentRoomId, is_system: true
         });
       }
     } catch (err: any) {
-      toast({ title: "Errore Invio", description: err.message, variant: "destructive" });
+      toast({ title: "Errore", description: err.message, variant: "destructive" });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const copyJoinCode = () => {
+    if (activeRoom?.join_code) {
+      navigator.clipboard.writeText(activeRoom.join_code);
+      toast({ title: "Codice Copiato!", description: "Condividilo per farli unire." });
     }
   };
 
@@ -180,8 +161,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const isAdmin = user?.email === 'info@luigicopertino.it' || user?.email === 'unixgigi@gmail.com';
 
   return (
-    <div className="h-screen flex bg-gray-950 text-white overflow-hidden font-sans">
-      {/* SIDEBAR SINISTRA */}
+    <div className="h-screen flex bg-gray-950 text-white overflow-hidden font-sans text-left">
       <aside className="w-64 border-r border-gray-800 bg-gray-900/50 flex flex-col hidden md:flex">
         <div className="p-6">
           <div className="flex items-center gap-2 mb-8 justify-center">
@@ -193,32 +173,34 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:text-violet-400"><Plus className="h-4 w-4" /></Button>
           </div>
           <nav className="space-y-1 overflow-y-auto">
-            {roomsLoading ? (
-              <div className="flex justify-center p-4"><Loader2 className="animate-spin h-4 w-4 text-gray-700" /></div>
-            ) : rooms.map(room => (
-              <button key={room.id} onClick={() => onRoomChange(room.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all duration-200 ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/30' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
+            {roomsLoading ? <div className="flex justify-center p-4"><Loader2 className="animate-spin h-4 w-4 text-gray-700" /></div> : rooms.map(room => (
+              <button key={room.id} onClick={() => onRoomChange(room.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all duration-200 ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
                 {room.is_private ? <MessageSquare className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
-                <span className="truncate font-bold tracking-tight">{room.name}</span>
+                <span className="truncate font-bold">{room.name}</span>
               </button>
             ))}
           </nav>
         </div>
         <div className="mt-auto p-4 border-t border-gray-800 space-y-1">
-          {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
-          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 font-bold hover:bg-gray-800 hover:text-white transition-colors"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
-          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300 transition-colors"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
+          {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
+          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 font-bold hover:bg-gray-800 hover:text-white"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
+          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
         </div>
       </aside>
 
-      {/* CHAT AREA */}
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950">
         <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-6 flex items-center justify-between">
-          <div className="flex flex-col text-left">
-            <h2 className="font-bold text-sm text-white uppercase tracking-tighter italic">{activeRoom?.name || 'Inizializzazione...'}</h2>
-            <span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{activeRoom?.ai_provider || 'Engine'} active</span>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+              <h2 className="font-bold text-sm text-white uppercase tracking-tighter italic">{activeRoom?.name || 'Seleziona stanza'}</h2>
+              {!activeRoom?.is_private && activeRoom?.join_code && (
+                <button onClick={copyJoinCode} className="bg-gray-800 text-[10px] px-2 py-0.5 rounded border border-gray-700 text-gray-400 hover:text-white flex items-center gap-1">#{activeRoom.join_code} <Copy className="h-2.5 w-2.5" /></button>
+              )}
+            </div>
+            <span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{activeRoom?.ai_provider} active</span>
           </div>
           <div className="flex items-center gap-3">
-            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600 shadow-lg'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Conferma (${selectedMessageIds.length})` : 'Summarize'}</Button>
+            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Confirm (${selectedMessageIds.length})` : 'Summarize'}</Button>
             <Button onClick={() => onDevelop()} disabled={!activeRoom?.mcp_endpoint} size="sm" className={`${activeRoom?.mcp_endpoint ? 'bg-emerald-600' : 'bg-gray-800 text-gray-500 opacity-50'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}><Code className="mr-2 h-3.5 w-3.5" /> Develop</Button>
           </div>
         </header>
@@ -232,7 +214,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
         <form onSubmit={handleSend} className="p-6 bg-gray-900/30 border-t border-gray-800">
           <div className="max-w-4xl mx-auto flex gap-4">
-            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : "Scrivi alla tua AI o al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
+            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : "Chatta o scrivi al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
             <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-2xl h-[56px] px-6 shadow-xl shadow-violet-900/30">
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
