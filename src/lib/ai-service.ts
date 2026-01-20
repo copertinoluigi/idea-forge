@@ -13,18 +13,13 @@ export interface AIConfig {
 }
 
 export const AI_PROVIDERS: AIConfig[] = [
-  { value: 'google-flash', label: 'Gemini 1.5 Flash (Veloce)', model: 'gemini-1.5-flash', provider: 'google' },
-  { value: 'google-pro', label: 'Gemini 1.5 Pro (Intelligente)', model: 'gemini-1.5-pro', provider: 'google' },
-  { value: 'openai-4o', label: 'GPT-4o (Bilanciato)', model: 'gpt-4o', provider: 'openai' },
-  { value: 'openai-4', label: 'GPT-4 Turbo (Preciso)', model: 'gpt-4-turbo', provider: 'openai' },
+  // FIX: Usiamo nomi modello standardizzati per l'SDK
+  { value: 'google-flash', label: 'Gemini 1.5 Flash', model: 'gemini-1.5-flash', provider: 'google' },
+  { value: 'google-pro', label: 'Gemini 1.5 Pro', model: 'gemini-1.5-pro', provider: 'google' },
+  { value: 'openai-4o', label: 'GPT-4o', model: 'gpt-4o', provider: 'openai' },
+  { value: 'openai-4', label: 'GPT-4 Turbo', model: 'gpt-4-turbo', provider: 'openai' },
   { value: 'anthropic-sonnet', label: 'Claude 3.5 Sonnet', model: 'claude-3-5-sonnet-20241022', provider: 'anthropic' },
 ];
-
-const SYSTEM_PROMPT = `Sei un esperto Startup Coach e Product Manager. Il tuo compito è analizzare frammenti di conversazione e riassunti precedenti per distillare l'evoluzione di un'idea.
-Struttura la risposta in:
-## Analisi Critica
-## Ricerca di Mercato
-## Roadmap 0-to-launch`;
 
 interface SummarizeParams {
   messages: Array<{ user: string; content: string }>;
@@ -49,29 +44,31 @@ export async function summarizeConversation({
   const config = AI_PROVIDERS.find(p => p.value === provider) || AI_PROVIDERS[0];
   
   let model;
-  switch (config.provider) {
-    case 'google':
-      model = createGoogleGenerativeAI({ apiKey })(config.model);
-      break;
-    case 'openai':
-      model = createOpenAI({ apiKey })(config.model);
-      break;
-    case 'anthropic':
-      model = createAnthropic({ apiKey })(config.model);
-      break;
-    default:
-      throw new Error(`Provider non supportato`);
-  }
-
   try {
+    switch (config.provider) {
+      case 'google':
+        // FIX: configurazione esplicita per evitare v1beta mismatch
+        model = createGoogleGenerativeAI({ apiKey })(config.model);
+        break;
+      case 'openai':
+        model = createOpenAI({ apiKey })(config.model);
+        break;
+      case 'anthropic':
+        model = createAnthropic({ apiKey })(config.model);
+        break;
+      default:
+        throw new Error(`Provider non supportato`);
+    }
+
     const { text } = await generateText({
       model,
-      system: SYSTEM_PROMPT,
+      system: "Sei un esperto Startup Coach. Rispondi in modo conciso e chirurgico.",
       prompt: userPrompt,
       temperature: 0.7,
     });
     return text;
   } catch (error: any) {
+    console.error("AI Service Error:", error);
     throw new Error(`Generazione fallita: ${error.message}`);
   }
 }
