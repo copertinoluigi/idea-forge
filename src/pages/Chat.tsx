@@ -27,7 +27,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [roomsLoading, setRoomsLoading] = useState(true);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [isAddRoomOpen, setIsAddRoomOpen] = useState(false);
@@ -55,18 +54,12 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   const loadRooms = async () => {
     if (!user) return;
-    setRoomsLoading(true);
-    
-    const { data: memberships } = await supabase
-      .from('room_members')
-      .select('room_id, rooms(*)')
-      .eq('user_email', user.email);
-
+    const { data: memberships } = await supabase.from('room_members').select('room_id, rooms(*)').eq('user_email', user.email);
     const memberRooms = memberships?.map(m => m.rooms).filter(Boolean) as Room[] || [];
     const privateConsole = memberRooms.find(r => r.is_private);
 
     if (!privateConsole) {
-      const { data: newRoom, error: rErr } = await supabase.from('rooms').insert({
+      const { data: newRoom } = await supabase.from('rooms').insert({
         name: 'La mia Console', is_private: true, created_by: user.id, ai_provider: 'google-flash'
       }).select().single();
 
@@ -84,7 +77,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         onRoomChange(privateConsole.id);
       }
     }
-    setRoomsLoading(false);
   };
 
   const loadMessages = async () => {
@@ -130,10 +122,10 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </div>
           <div className="flex items-center justify-between mb-4 px-2">
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</p>
-            <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:text-violet-400"><Plus className="h-4 w-4" /></Button>
+            <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-5 w-5 text-gray-400 hover:text-violet-400 transition-colors"><Plus className="h-4 w-4" /></Button>
           </div>
           <nav className="space-y-1 overflow-y-auto">
-            {roomsLoading ? <Loader2 className="animate-spin mx-auto mt-4 text-gray-700" /> : rooms.map(room => (
+            {rooms.map(room => (
               <button key={room.id} onClick={() => onRoomChange(room.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all duration-200 ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'}`}>
                 {room.is_private ? <MessageSquare className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
                 <span className="truncate font-bold">{room.name}</span>
@@ -141,10 +133,10 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             ))}
           </nav>
         </div>
-        <div className="mt-auto p-4 border-t border-gray-800 space-y-1">
-          {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
-          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 font-bold hover:bg-gray-800 hover:text-white"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
-          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
+        <div className="mt-auto p-4 border-t border-gray-800 space-y-1 bg-gray-900/10">
+          {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"><ShieldCheck className="h-4 w-4 mr-2" /> Gestione Riservata</Button>}
+          <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-300 font-bold hover:bg-gray-800 hover:text-white transition-colors"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
+          <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300 transition-colors"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
         </div>
       </aside>
 
@@ -160,8 +152,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <span className="text-[9px] text-violet-400 font-black uppercase tracking-[0.2em]">{activeRoom?.ai_provider} active</span>
           </div>
           <div className="flex items-center gap-3">
-            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600 shadow-lg shadow-violet-900/40'} text-white rounded-full font-black px-5 transition-all text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Confirm (${selectedMessageIds.length})` : 'Summarize'}</Button>
-            <Button onClick={() => onDevelop()} disabled={!activeRoom?.mcp_endpoint} size="sm" className={`${activeRoom?.mcp_endpoint ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20' : 'bg-gray-800 text-gray-600 opacity-50 cursor-not-allowed'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}><Code className="mr-2 h-3.5 w-3.5" /> Develop</Button>
+            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600' : 'bg-violet-600 shadow-lg shadow-violet-900/40'} text-white rounded-full font-black px-5 transition-all text-[10px] uppercase tracking-widest`}><Sparkles className="mr-2 h-3.5 w-3.5" /> {isSelectionMode ? `Conferma (${selectedMessageIds.length})` : 'Summarize'}</Button>
+            <Button onClick={() => onDevelop()} disabled={!activeRoom?.mcp_endpoint} size="sm" className={`${activeRoom?.mcp_endpoint ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20' : 'bg-gray-800 text-gray-500 opacity-50'} text-white rounded-full font-black px-5 text-[10px] uppercase tracking-widest`}><Code className="mr-2 h-3.5 w-3.5" /> Develop</Button>
           </div>
         </header>
 
@@ -174,8 +166,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
         <form onSubmit={handleSend} className="p-6 bg-gray-900/30 border-t border-gray-800">
           <div className="max-w-4xl mx-auto flex gap-4">
-            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : (activeRoomId ? "Chatta o scrivi al gruppo..." : "Caricamento stanza...")} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
-            <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-2xl h-[56px] px-6 shadow-xl shadow-violet-900/30">
+            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isSelectionMode ? "Seleziona i messaggi e conferma in alto..." : "Scrivi alla tua AI o al gruppo..."} disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-950 border-gray-800 text-white placeholder:text-gray-600 rounded-2xl focus:ring-violet-500/50 min-h-[56px] resize-none py-4 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} />
+            <Button type="submit" disabled={loading || !newMessage.trim() || isSelectionMode || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-2xl h-[56px] px-6 shadow-xl shadow-violet-900/30 transition-transform active:scale-95">
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
           </div>
