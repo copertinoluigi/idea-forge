@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { Login } from '@/pages/Login';
 import { Register } from '@/pages/Register';
@@ -52,7 +52,7 @@ function AppContent() {
       const timestamp = new Date().toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
       await supabase.from('summaries').insert({ room_id: activeRoomId, title: `Analisi ${timestamp}`, content: result });
 
-      toast({ title: "Analisi completata" });
+      toast({ title: "Analisi completata", description: "Il nuovo layer è stato salvato in archivio." });
       setSummarySidebarOpen(false);
       setPendingMessages([]);
     } catch (err: any) {
@@ -62,7 +62,6 @@ function AppContent() {
     }
   };
 
-  // Logica di caricamento con uscita di sicurezza
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-950">
