@@ -39,7 +39,7 @@ function AppContent() {
       const { data: sums } = await supabase.from('summaries').select('content').in('id', selectedSummaryIds);
       
       const result = await summarizeConversation({
-        messages: pendingMessages.map(m => ({ user: 'Team Member', content: m.content })),
+        messages: pendingMessages.map(m => ({ user: 'Member', content: m.content })),
         previousSummaries: sums?.map(s => s.content) || [],
         provider: room.ai_provider,
         apiKey: room.encrypted_api_key
