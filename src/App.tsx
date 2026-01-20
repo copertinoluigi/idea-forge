@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { Login } from '@/pages/Login';
 import { Register } from '@/pages/Register';
@@ -30,10 +30,6 @@ function AppContent() {
 
   const { toast } = useToast();
 
-  /**
-   * Logica per il Riassunto a Strati (Layered Context)
-   * Riceve i riassunti scelti dalla Sidebar.
-   */
   const handleSummarize = async (selectedSummaryIds: string[]) => {
     if (!activeRoomId || pendingMessages.length === 0) {
       toast({ title: "Attenzione", description: "Seleziona i messaggi e assicurati di essere in una stanza.", variant: "destructive" });
@@ -42,7 +38,6 @@ function AppContent() {
 
     setIsSummarizing(true);
     try {
-      // 1. Recupera la stanza per avere la chiave API specifica della stanza
       const { data: room, error: roomError } = await supabase
         .from('rooms')
         .select('*')
@@ -50,10 +45,9 @@ function AppContent() {
         .single();
 
       if (roomError || !room?.encrypted_api_key) {
-        throw new Error("API Key non trovata per questa stanza. Configurala nei settings della stanza.");
+        throw new Error("API Key non trovata per questa stanza.");
       }
 
-      // 2. Recupera i contenuti dei riassunti precedenti selezionati (Layers)
       let previousLayers: string[] = [];
       if (selectedSummaryIds.length > 0) {
         const { data: sums } = await supabase
@@ -63,13 +57,11 @@ function AppContent() {
         previousLayers = sums?.map(s => s.content) || [];
       }
 
-      // 3. Formatta i messaggi selezionati
       const formattedMsgs = pendingMessages.map(m => ({
         user: 'Team Member',
         content: m.content
       }));
 
-      // 4. Chiama il servizio AI
       const result = await summarizeConversation({
         messages: formattedMsgs,
         previousSummaries: previousLayers,
@@ -77,7 +69,6 @@ function AppContent() {
         apiKey: room.encrypted_api_key
       });
 
-      // 5. Salva il nuovo riassunto
       const timestamp = new Date().toLocaleString('it-IT', { 
         day: '2-digit', month: '2-digit', year: 'numeric', 
         hour: '2-digit', minute: '2-digit' 
@@ -93,57 +84,22 @@ function AppContent() {
 
       if (saveError) throw saveError;
 
-      toast({ title: "Analisi completata", description: "Nuovo snapshot salvato con successo." });
+      toast({ title: "Analisi completata", description: "Nuovo snapshot salvato." });
       setSummarySidebarOpen(false);
       setPendingMessages([]);
 
     } catch (err: any) {
-      console.error(err);
       toast({ title: "Errore AI", description: err.message, variant: "destructive" });
     } finally {
       setIsSummarizing(false);
     }
   };
 
-  /**
-   * Gestione dello stato di caricamento iniziale
-   */
-  if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-gray-950">
-        <Loader2 className="h-8 w-8 text-violet-400 animate-spin" />
-      </div>
-    );
-  }
-
-  /**
-   * Gestione autenticazione
-   */
-  if (!user) {
-    return authMode === 'login' ? (
-      <Login onToggleMode={() => setAuthMode('register')} />
-    ) : (
-      <Register onToggleMode={() => setAuthMode('login')} />
-    );
-  }
-
-  /**
-   * Gestione setup iniziale obbligatorio
-   */
-  if (!profile?.has_completed_setup) {
-    return <Setup />;
-  }
-
-  /**
-   * Router interno
-   */
-  if (currentView === 'settings') {
-    return <Settings onBack={() => setCurrentView('chat')} />;
-  }
-
-  if (currentView === 'admin' && user.email === 'info@luigicopertino.it') {
-    return <AdminDashboard onBack={() => setCurrentView('chat')} />;
-  }
+  if (loading) return <div className="h-screen flex items-center justify-center bg-gray-950"><Loader2 className="h-8 w-8 text-violet-400 animate-spin" /></div>;
+  if (!user) return authMode === 'login' ? <Login onToggleMode={() => setAuthMode('register')} /> : <Register onToggleMode={() => setAuthMode('login')} />;
+  if (!profile?.has_completed_setup) return <Setup />;
+  if (currentView === 'settings') return <Settings onBack={() => setCurrentView('chat')} />;
+  if (currentView === 'admin' && user.email === 'info@luigicopertino.it') return <AdminDashboard onBack={() => setCurrentView('chat')} />;
 
   return (
     <>
@@ -158,39 +114,18 @@ function AppContent() {
         }}
         onDevelop={() => setDevelopModalOpen(true)}
       />
-
       <SummarySidebar
         isOpen={summarySidebarOpen}
         roomId={activeRoomId}
-        onClose={() => {
-          setSummarySidebarOpen(false);
-          setPendingMessages([]);
-        }}
+        onClose={() => { setSummarySidebarOpen(false); setPendingMessages([]); }}
         onGenerate={handleSummarize}
         loading={isSummarizing}
       />
-
-      <DevelopModal
-        isOpen={developModalOpen}
-        onClose={() => setDevelopModalOpen(false)}
-        onDevelop={async () => {
-          await new Promise(r => setTimeout(r, 4000));
-          toast({ title: "Develop Triggered", description: "Richiesta inviata all'MCP." });
-          setDevelopModalOpen(false);
-        }}
-      />
-
+      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => {}} />
       <Toaster />
     </>
   );
 }
 
-function App() {
-  return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
-  );
-}
-
+function App() { return <AuthProvider><AppContent /></AuthProvider>; }
 export default App;
