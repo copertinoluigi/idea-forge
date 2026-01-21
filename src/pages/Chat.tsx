@@ -32,6 +32,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [roomsLoading, setRoomsLoading] = useState(true); // AGGIUNTO: Stato mancante
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
@@ -68,76 +69,58 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   }, [activeRoomId]);
 
   const loadRoomsAndSync = async () => {
-  if (!user) return;
-  setRoomsLoading(true);
-  try {
-    // 1. Cerchiamo le stanze di cui l'utente è membro usando l'user_id (più sicuro dell'email)
-    const { data: memberships, error: memError } = await supabase
-      .from('room_members')
-      .select('rooms (*)')
-      .eq('user_id', user.id);
+    if (!user) return;
+    setRoomsLoading(true);
+    try {
+      // 1. Carica le stanze di cui l'utente è membro
+      const { data: memberships, error: memError } = await supabase
+        .from('room_members')
+        .select('rooms (*)')
+        .eq('user_id', user.id);
 
-    if (memError) throw memError;
+      if (memError) throw memError;
 
-    let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
-    let privateConsole = memberRooms.find(r => r.is_private);
+      let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
+      let privateConsole = memberRooms.find(r => r.is_private);
 
-    // 2. Se non esiste una console privata, proviamo a crearla
-    if (!privateConsole) {
-      console.log("Nessuna console privata trovata, creazione in corso...");
-      
-      const { data: newRoom, error: roomError } = await supabase
-        .from('rooms')
-        .insert({
-          name: 'La mia Console',
-          is_private: true,
-          created_by: user.id,
-          ai_provider: 'google-flash'
-        })
-        .select()
-        .single();
+      // 2. Se è un nuovo utente e non ha una console, creala
+      if (!privateConsole) {
+        console.log("Nuovo utente rilevato: creazione console privata...");
+        const { data: newRoom, error: roomError } = await supabase
+          .from('rooms')
+          .insert({
+            name: 'La mia Console',
+            is_private: true,
+            created_by: user.id,
+            ai_provider: 'google-flash'
+          })
+          .select()
+          .single();
 
-      if (roomError) {
-        console.error("Errore creazione room:", roomError);
-        throw roomError;
-      }
+        if (roomError) throw roomError;
 
-      if (newRoom) {
-        // Creiamo la membership per la nuova stanza
-        const { error: joinError } = await supabase
-          .from('room_members')
-          .insert({ 
+        if (newRoom) {
+          await supabase.from('room_members').insert({ 
             room_id: newRoom.id, 
-            user_email: user.email, 
             user_id: user.id, 
+            user_email: user.email, 
             role: 'owner' 
           });
-
-        if (joinError) {
-          console.error("Errore creazione membership:", joinError);
-          throw joinError;
+          memberRooms = [newRoom, ...memberRooms];
+          privateConsole = newRoom;
         }
-
-        memberRooms = [newRoom, ...memberRooms];
-        privateConsole = newRoom;
       }
-    }
 
-    setRooms(memberRooms);
-    
-    // Imposta la stanza attiva
-    const savedId = profile?.last_room_id || localStorage.getItem('lastActiveRoomId');
-    if (savedId && memberRooms.some(r => r.id === savedId)) {
-      onRoomChange(savedId);
-    } else if (privateConsole) {
-      onRoomChange(privateConsole.id);
+      setRooms(memberRooms);
+      const savedId = profile?.last_room_id || localStorage.getItem('lastActiveRoomId');
+      if (savedId && memberRooms.some(r => r.id === savedId)) onRoomChange(savedId);
+      else if (privateConsole) onRoomChange(privateConsole.id);
+    } catch (err) {
+      console.error("Errore sincronizzazione stanze:", err);
+    } finally {
+      setRoomsLoading(false);
     }
-  } catch (error) {
-    console.error("loadRoomsAndSync Critical Error:", error);
-  } finally {
-    setRoomsLoading(false);
-  }
-};
+  };
 
   const loadMessages = async (id: string) => {
     const { data } = await supabase.from('messages').select('*, profiles(display_name)').eq('room_id', id).order('created_at', { ascending: true });
@@ -197,7 +180,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   return (
     <div className="h-full w-full flex bg-gray-950 text-white overflow-hidden font-sans relative">
-      
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
           <div className="p-6 flex items-center justify-between border-b border-gray-800 bg-gray-900">
@@ -208,11 +190,16 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <Button variant="ghost" size="icon" className="md:hidden text-gray-500" onClick={() => setIsSidebarOpen(false)}><X /></Button>
           </div>
           <div className="flex-1 overflow-y-auto px-3 py-4 custom-scrollbar">
-            {rooms.map(room => (
-              <button key={room.id} onClick={() => handleRoomSwitch(room.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all mb-1 ${activeRoomId === room.id ? 'bg-violet-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>
+            {roomsLoading ? (
+               <div className="flex justify-center p-4"><Loader2 className="animate-spin h-6 w-6 text-gray-700" /></div>
+            ) : rooms.map(room => (
+              <button key={room.id} onClick={() => handleRoomSwitch(room.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all mb-1 ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40' : 'text-gray-400 hover:bg-gray-800'}`}>
                 <Hash className="h-4 w-4" /> <span className="truncate font-bold tracking-tight">{room.name}</span>
               </button>
             ))}
+            {!roomsLoading && rooms.length === 0 && (
+              <p className="text-[10px] text-gray-600 text-center px-4 mt-4 uppercase font-bold tracking-widest">Nessuna stanza disponibile</p>
+            )}
           </div>
           <div className="p-4 border-t border-gray-800 space-y-1 bg-gray-950/50">
             {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold"><ShieldCheck className="h-4 w-4 mr-2" /> Admin</Button>}
@@ -226,7 +213,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950 h-full relative">
         <header className="h-16 border-b border-gray-800 bg-gray-900/50 flex items-center justify-between px-4 sticky top-0 z-30 flex-shrink-0">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 overflow-hidden">
             <Button variant="ghost" size="icon" className="md:hidden text-gray-400" onClick={() => setIsSidebarOpen(true)}><Menu /></Button>
             <h2 className="font-bold text-sm text-white uppercase italic truncate max-w-[150px]">{activeRoom?.name || 'BYOI'}</h2>
           </div>
@@ -250,7 +237,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             {showEmojiPicker && (
               <div className="absolute bottom-[120%] left-0 z-50 p-2 bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl grid grid-cols-5 gap-1">
                 {EMOJIS.map(emoji => (
-                  <button key={emoji} type="button" onClick={() => setNewMessage(p => p + emoji)} className="w-10 h-10 flex items-center justify-center text-xl hover:bg-gray-800 rounded-lg">{emoji}</button>
+                  <button key={emoji} type="button" onClick={() => setNewMessage(p => p + emoji)} className="w-10 h-10 flex items-center justify-center text-xl hover:bg-gray-800 rounded-lg transition-colors">{emoji}</button>
                 ))}
               </div>
             )}
@@ -259,7 +246,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               <Button type="button" variant="ghost" size="icon" disabled={isUploading} onClick={() => fileInputRef.current?.click()} className="text-gray-400 hover:text-white">
                 {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" />}
               </Button>
-              <Button type="button" variant="ghost" size="icon" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`text-gray-400 hover:text-white ${showEmojiPicker ? 'text-violet-400' : ''}`}><Smile className="h-5 w-5" /></Button>
+              <Button type="button" variant="ghost" size="icon" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`text-gray-400 hover:text-white ${showEmojiPicker ? 'text-violet-400 bg-gray-900' : ''}`}><Smile className="h-5 w-5" /></Button>
             </div>
             <Textarea 
               value={newMessage} 
@@ -267,10 +254,10 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               onFocus={() => { if(window.innerWidth < 768) window.scrollTo(0, 0); }}
               style={{ fontSize: '16px' }} 
               placeholder="Messaggio..." 
-              className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl min-h-[48px] h-12 py-3 px-4 resize-none" 
+              className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] h-12 max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" 
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(); } }} 
             />
-            <Button type="submit" disabled={loading || !newMessage.trim()} className="bg-violet-600 text-white rounded-xl h-12 w-12 flex-shrink-0 flex items-center justify-center"><Send className="h-5 w-5" /></Button>
+            <Button type="submit" disabled={loading || !newMessage.trim()} className="bg-violet-600 text-white rounded-xl h-12 w-12 flex-shrink-0 flex items-center justify-center shadow-lg"><Send className="h-5 w-5" /></Button>
           </form>
         </div>
       </main>
