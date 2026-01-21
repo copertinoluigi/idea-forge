@@ -4,95 +4,43 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { 
-  Users, 
-  Ticket, 
-  ArrowLeft, 
-  Plus, 
-  Trash2, 
-  ShieldCheck, 
-  Activity,
-  RefreshCw
-} from 'lucide-react';
+import { Users, Ticket, ArrowLeft, Plus, Trash2, ShieldCheck, Activity, RefreshCw } from 'lucide-react';
 
-interface AdminDashboardProps {
-  onBack: () => void;
-}
-
-export function AdminDashboard({ onBack }: AdminDashboardProps) {
+export function AdminDashboard({ onBack }: { onBack: () => void }) {
   const [users, setUsers] = useState<any[]>([]);
   const [invites, setInvites] = useState<any[]>([]);
   const [newInviteCode, setNewInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState({ totalUsers: 0, totalRooms: 0, totalMessages: 0 });
-  
   const { toast } = useToast();
 
-  useEffect(() => {
-    loadAdminData();
-  }, []);
+  useEffect(() => { loadAdminData(); }, []);
 
   const loadAdminData = async () => {
     setLoading(true);
     try {
-      const { data: profiles } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-      setUsers(profiles || []);
-
-      const { data: inviteList } = await supabase.from('invites').select('*').order('created_at', { ascending: false });
-      setInvites(inviteList || []);
-
-      const { count: uCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
-      const { count: rCount } = await supabase.from('rooms').select('*', { count: 'exact', head: true });
-      const { count: mCount } = await supabase.from('messages').select('*', { count: 'exact', head: true });
-
-      setStats({
-        totalUsers: uCount || 0,
-        totalRooms: rCount || 0,
-        totalMessages: mCount || 0
-      });
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const createInvite = async () => {
-    if (!newInviteCode) return;
-    try {
-      const { error } = await supabase.from('invites').insert({
-        code: newInviteCode.toUpperCase().trim(),
-        is_used: false
-      });
-      if (error) throw error;
-      setNewInviteCode('');
-      loadAdminData();
-      toast({ title: "Codice creato", description: "L'invito è ora attivo." });
-    } catch (err: any) {
-      toast({ title: "Errore", description: err.message, variant: "destructive" });
-    }
+      const { data: p } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+      setUsers(p || []);
+      const { data: i } = await supabase.from('invites').select('*').order('created_at', { ascending: false });
+      setInvites(i || []);
+      const { count: u } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+      const { count: r } = await supabase.from('rooms').select('*', { count: 'exact', head: true });
+      const { count: m } = await supabase.from('messages').select('*', { count: 'exact', head: true });
+      setStats({ totalUsers: u || 0, totalRooms: r || 0, totalMessages: m || 0 });
+    } finally { setLoading(false); }
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 p-6 md:p-12 text-white font-sans">
-      <div className="max-w-6xl mx-auto space-y-8">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between bg-gray-900/50 p-6 rounded-2xl border border-gray-800 shadow-2xl">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" onClick={onBack} className="text-gray-400 hover:text-white hover:bg-gray-800">
-              <ArrowLeft className="h-5 w-5 mr-2" /> Back
-            </Button>
-            <div className="flex items-center gap-3">
-              <div className="bg-emerald-500/20 p-2 rounded-lg">
-                <ShieldCheck className="h-6 w-6 text-emerald-400" />
-              </div>
-              <h1 className="text-2xl font-black tracking-tighter uppercase italic text-white">Master Admin</h1>
-            </div>
+    <div className="min-h-screen bg-gray-950 p-4 md:p-6 text-white font-sans overflow-x-hidden">
+      <div className="max-w-6xl mx-auto space-y-6">
+        <div className="flex flex-wrap items-center justify-between bg-gray-900 border border-gray-800 p-4 md:p-6 rounded-2xl shadow-2xl gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <Button variant="ghost" onClick={onBack} className="text-gray-400 hover:text-white px-2"><ArrowLeft className="h-4 w-4" /></Button>
+            <h1 className="text-lg md:text-2xl font-black uppercase italic text-emerald-400 flex items-center gap-2 truncate"><ShieldCheck className="flex-shrink-0" /> Admin</h1>
           </div>
-          <Button onClick={loadAdminData} disabled={loading} variant="secondary" className="bg-gray-800 text-white hover:bg-gray-700 border-gray-700">
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh Stats
+          <Button onClick={loadAdminData} variant="default" className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs md:text-sm">
+            {loading ? <RefreshCw className="animate-spin h-4 w-4 mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Aggiorna
           </Button>
         </div>
 
