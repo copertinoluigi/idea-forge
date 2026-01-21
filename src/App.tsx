@@ -42,7 +42,7 @@ function AppContent() {
         provider: room?.ai_provider || 'google-flash',
         apiKey: room?.encrypted_api_key || profile?.encrypted_api_key || ''
       });
-      const timestamp = new Date().toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const timestamp = new Date().toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
       await supabase.from('summaries').insert({ room_id: activeRoomId, title: `Snapshot ${timestamp}`, content: result });
       toast({ title: "Layer salvato!" });
       setSummarySidebarOpen(false);
@@ -51,37 +51,35 @@ function AppContent() {
     } finally { setIsSummarizing(false); setPendingMessages([]); }
   };
 
-  // 1. CARICAMENTO INIZIALE (SBLOCCATO)
+  // 1. Loader iniziale (Solo per Auth)
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-950 text-white">
+      <div className="h-screen flex items-center justify-center bg-gray-950">
         <div className="text-center space-y-4">
-          <Loader2 className="h-10 w-10 text-violet-500 animate-spin mx-auto" />
-          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em] animate-pulse">Sincronizzazione BYOI...</p>
+          <Loader2 className="animate-spin text-violet-500 h-10 w-10 mx-auto" />
+          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em] animate-pulse">BYOI Sincronizzazione...</p>
         </div>
       </div>
     );
   }
 
-  // 2. SE NON LOGGATO -> LOGIN
+  // 2. Se non loggato -> Auth
   if (!user) {
     return authMode === 'login' ? <Login onToggleMode={() => setAuthMode('register')} /> : <Register onToggleMode={() => setAuthMode('login')} />;
   }
 
-  // 3. SE LOGGATO MA SETUP MANCANTE (Solo se il profilo è arrivato)
+  // 3. Se loggato ma setup incompleto (Aspetta che profile sia caricato per decidere)
   if (profile && profile.has_completed_setup === false) {
     return <Setup />;
   }
 
-  // 4. ROUTER VISTE
+  // 4. Router Viste
   if (currentView === 'settings') return <Settings onBack={() => setCurrentView('chat')} />;
-  if (currentView === 'admin' && (user.email === 'info@luigicopertino.it' || user.email === 'unixgigi@gmail.com')) {
-    return <AdminDashboard onBack={() => setCurrentView('chat')} />;
-  }
+  if (currentView === 'admin') return <AdminDashboard onBack={() => setCurrentView('chat')} />;
 
-  // 5. CHAT (DEFAULT)
+  // 5. Chat (Default)
   return (
-    <div className="h-screen w-full bg-gray-950 overflow-hidden relative">
+    <>
       <Chat
         activeRoomId={activeRoomId}
         onRoomChange={handleRoomChange}
@@ -90,10 +88,10 @@ function AppContent() {
         onSummarize={(msgs) => { setPendingMessages(msgs); setSummarySidebarOpen(true); }}
         onDevelop={() => setDevelopModalOpen(true)}
       />
-      <SummarySidebar isOpen={summarySidebarOpen} roomId={activeRoomId} onClose={() => { setSummarySidebarOpen(false); setPendingMessages([]); }} onGenerate={handleSummarize} loading={isSummarizing} />
+      <SummarySidebar isOpen={summarySidebarOpen} roomId={activeRoomId} onClose={() => setSummarySidebarOpen(false)} onGenerate={handleSummarize} loading={isSummarizing} />
       <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => {}} />
       <Toaster />
-    </div>
+    </>
   );
 }
 
