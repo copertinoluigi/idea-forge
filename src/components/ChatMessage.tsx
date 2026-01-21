@@ -1,9 +1,16 @@
 import { format } from 'date-fns';
-import { CheckCircle2, Bot, Copy, Terminal, Check } from 'lucide-react';
+import { CheckCircle2, Bot, Copy, Terminal, Check, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Database } from '@/lib/database.types';
+
+// Definizione helper per l'interfaccia dell'allegato
+interface Attachment {
+  url: string;
+  name: string;
+  type: string;
+}
 
 type Message = Database['public']['Tables']['messages']['Row'] & {
   profiles: { display_name: string } | null;
@@ -19,6 +26,9 @@ interface ChatMessageProps {
 
 export function ChatMessage({ message, isOwn, isSelectionMode, isSelected, onSelect }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
+
+  // Cast sicuro degli allegati dal JSON del database
+  const attachments = (message.attachments as unknown as Attachment[]) || [];
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -62,6 +72,33 @@ export function ChatMessage({ message, isOwn, isSelectionMode, isSelected, onSel
     }
   };
 
+  // Renderizzatore allegati
+  const renderAttachments = () => {
+    if (attachments.length === 0) return null;
+    return (
+      <div className={`mt-2 flex flex-wrap gap-2 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+        {attachments.map((file, idx) => (
+          <div key={idx} className="relative group max-w-[240px]">
+            <img
+              src={file.url}
+              alt={file.name}
+              className="rounded-lg border border-gray-700 object-cover max-h-60 w-full hover:border-violet-500 transition-all cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                window.open(file.url, '_blank');
+              }}
+            />
+            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="bg-black/60 p-1 rounded-md backdrop-blur-sm">
+                <ExternalLink className="w-3 h-3 text-white" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   if (message.is_system) {
     return (
       <div 
@@ -95,6 +132,7 @@ export function ChatMessage({ message, isOwn, isSelectionMode, isSelected, onSel
                   {message.content}
                 </ReactMarkdown>
               </div>
+              {renderAttachments()}
               <p className="text-[9px] mt-3 opacity-30 font-mono">
                 {format(new Date(message.created_at), 'HH:mm')}
               </p>
@@ -130,9 +168,12 @@ export function ChatMessage({ message, isOwn, isSelectionMode, isSelected, onSel
               ? 'bg-violet-600 text-white rounded-br-none' 
               : 'bg-gray-800 text-gray-100 rounded-bl-none border border-gray-700'
           }`}>
-            <p className="text-[14px] md:text-sm whitespace-pre-wrap break-words leading-snug font-medium">
-              {message.content}
-            </p>
+            {message.content && (
+              <p className="text-[14px] md:text-sm whitespace-pre-wrap break-words leading-snug font-medium">
+                {message.content}
+              </p>
+            )}
+            {renderAttachments()}
             <p className={`text-[9px] mt-1 opacity-50 ${isOwn ? 'text-violet-100' : 'text-gray-500'}`}>
               {format(new Date(message.created_at), 'HH:mm')}
             </p>
