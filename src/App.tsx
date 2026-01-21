@@ -1,97 +1,100 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User } from '@supabase/supabase-js';
+import { useState } from 'react';
+import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { Login } from '@/pages/Login';
+import { Register } from '@/pages/Register';
+import { Setup } from '@/pages/Setup';
+import { Chat } from '@/pages/Chat';
+import { Settings } from '@/pages/Settings';
+import { AdminDashboard } from '@/pages/AdminDashboard';
+import { SummarySidebar } from '@/components/SummarySidebar';
+import { DevelopModal } from '@/components/DevelopModal';
+import { Toaster } from '@/components/ui/toaster';
 import { supabase } from '@/lib/supabase';
-import type { Database } from '@/lib/database.types';
+import { useToast } from '@/hooks/use-toast';
+import { summarizeConversation } from '@/lib/ai-service';
+import { Loader2 } from 'lucide-react';
 
-type Profile = Database['public']['Tables']['profiles']['Row'];
+function AppContent() {
+  const { user, profile, loading } = useAuth();
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [currentView, setCurrentView] = useState<'chat' | 'settings' | 'admin'>('chat');
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [summarySidebarOpen, setSummarySidebarOpen] = useState(false);
+  const [developModalOpen, setDevelopModalOpen] = useState(false);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [pendingMessages, setPendingMessages] = useState<any[]>([]);
+  const { toast } = useToast();
 
-interface AuthContextType {
-  user: User | null;
-  profile: Profile | null;
-  loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, displayName: string, inviteCode: string) => Promise<void>;
-  signOut: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
-}
+  const handleRoomChange = (id: string) => {
+    setActiveRoomId(id);
+    localStorage.setItem('lastActiveRoomId', id);
+  };
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const loadProfile = async (userId: string, email: string) => {
+  const handleSummarize = async (selectedSummaryIds: string[]) => {
+    if (!activeRoomId || pendingMessages.length === 0) return;
+    setIsSummarizing(true);
     try {
-      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
-      if (error) throw error;
-      if (data) {
-        setProfile(data);
-      } else {
-        // Auto-creazione di emergenza
-        const { data: newP } = await supabase.from('profiles').insert({
-          id: userId, email, display_name: email.split('@')[0], has_completed_setup: false
-        }).select().single();
-        if (newP) setProfile(newP);
-      }
-    } catch (e) {
-      console.error("AuthContext: Profile load failed", e);
-    }
+      const { data: room } = await supabase.from('rooms').select('*').eq('id', activeRoomId).single();
+      const { data: sums } = await supabase.from('summaries').select('content').in('id', selectedSummaryIds);
+      const result = await summarizeConversation({
+        messages: pendingMessages.map(m => ({ user: 'Member', content: m.content })),
+        previousSummaries: sums?.map(s => s.content) || [],
+        provider: room?.ai_provider || 'google-flash',
+        apiKey: room?.encrypted_api_key || profile?.encrypted_api_key || ''
+      });
+      const timestamp = new Date().toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      await supabase.from('summaries').insert({ room_id: activeRoomId, title: `Snapshot ${timestamp}`, content: result });
+      toast({ title: "Layer salvato!" });
+      setSummarySidebarOpen(false);
+    } catch (err: any) {
+      toast({ title: "Errore AI", description: err.message, variant: "destructive" });
+    } finally { setIsSummarizing(false); setPendingMessages([]); }
   };
 
-  useEffect(() => {
-    let mounted = true;
+  // 1. CARICAMENTO INIZIALE (SBLOCCATO)
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-950 text-white">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-10 w-10 text-violet-500 animate-spin mx-auto" />
+          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em] animate-pulse">Sincronizzazione BYOI...</p>
+        </div>
+      </div>
+    );
+  }
 
-    async function getInitialSession() {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (mounted && session?.user) {
-          setUser(session.user);
-          await loadProfile(session.user.id, session.user.email!);
-        }
-      } finally {
-        if (mounted) setLoading(false); // SBLOCCO GARANTITO
-      }
-    }
+  // 2. SE NON LOGGATO -> LOGIN
+  if (!user) {
+    return authMode === 'login' ? <Login onToggleMode={() => setAuthMode('register')} /> : <Register onToggleMode={() => setAuthMode('login')} />;
+  }
 
-    getInitialSession();
+  // 3. SE LOGGATO MA SETUP MANCANTE (Solo se il profilo è arrivato)
+  if (profile && profile.has_completed_setup === false) {
+    return <Setup />;
+  }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (mounted) {
-        if (session?.user) {
-          setUser(session.user);
-          await loadProfile(session.user.id, session.user.email!);
-        } else {
-          setUser(null);
-          setProfile(null);
-        }
-        setLoading(false);
-      }
-    });
+  // 4. ROUTER VISTE
+  if (currentView === 'settings') return <Settings onBack={() => setCurrentView('chat')} />;
+  if (currentView === 'admin' && (user.email === 'info@luigicopertino.it' || user.email === 'unixgigi@gmail.com')) {
+    return <AdminDashboard onBack={() => setCurrentView('chat')} />;
+  }
 
-    return () => { mounted = false; subscription.unsubscribe(); };
-  }, []);
-
-  const refreshProfile = async () => {
-    if (user) await loadProfile(user.id, user.email!);
-  };
-
+  // 5. CHAT (DEFAULT)
   return (
-    <AuthContext.Provider value={{ 
-      user, profile, loading, 
-      signIn: async (e, p) => { await supabase.auth.signInWithPassword({email: e, password: p}) },
-      signUp: async () => {}, // Logica gestita in Register.tsx
-      signOut: async () => { await supabase.auth.signOut(); localStorage.clear(); },
-      refreshProfile 
-    }}>
-      {children}
-    </AuthContext.Provider>
+    <div className="h-screen w-full bg-gray-950 overflow-hidden relative">
+      <Chat
+        activeRoomId={activeRoomId}
+        onRoomChange={handleRoomChange}
+        onNavigateToSettings={() => setCurrentView('settings')}
+        onNavigateToAdmin={() => setCurrentView('admin')}
+        onSummarize={(msgs) => { setPendingMessages(msgs); setSummarySidebarOpen(true); }}
+        onDevelop={() => setDevelopModalOpen(true)}
+      />
+      <SummarySidebar isOpen={summarySidebarOpen} roomId={activeRoomId} onClose={() => { setSummarySidebarOpen(false); setPendingMessages([]); }} onGenerate={handleSummarize} loading={isSummarizing} />
+      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => {}} />
+      <Toaster />
+    </div>
   );
 }
 
-export const useAuth = () => {
-  const c = useContext(AuthContext);
-  if (!c) throw new Error("useAuth error");
-  return c;
-};
+export default function App() { return <AuthProvider><AppContent /></AuthProvider>; }
