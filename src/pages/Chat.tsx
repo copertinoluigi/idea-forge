@@ -18,6 +18,7 @@ import type { Database } from '@/lib/database.types';
 type Message = Database['public']['Tables']['messages']['Row'] & { profiles: { display_name: string } | null };
 type Room = Database['public']['Tables']['rooms']['Row'];
 
+// STEP C: Lista Emoji Nativa
 const EMOJIS = ["😊", "😂", "🚀", "💡", "🔥", "✅", "❌", "🤔", "👍", "🎨", "💻", "🤖", "📈", "📅", "🔒", "✨", "🎯", "📝", "🌍", "⚡"];
 
 interface ChatProps {
@@ -39,6 +40,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [isAddRoomOpen, setIsAddRoomOpen] = useState(false);
+  
+  // Stati per Media ed Emoji
   const [isUploading, setIsUploading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -48,40 +51,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomIdRef = useRef(activeRoomId);
 
-  /useEffect(() => {
-  const handleViewportChange = () => {
-    if (window.visualViewport) {
-      const vv = window.visualViewport;
-      // Impostiamo l'altezza reale visibile
-      document.documentElement.style.setProperty('--vh', `${vv.height}px`);
-      
-      // FIX CRUCIALE: Se la tastiera è aperta (height ridotta), 
-      // forziamo lo scroll a 0 per impedire a iOS di traslare la pagina
-      if (vv.height < window.innerHeight) {
-        window.scrollTo(0, 0);
-      }
-    }
-  };
-
-  window.visualViewport?.addEventListener('resize', handleViewportChange);
-  window.visualViewport?.addEventListener('scroll', handleViewportChange);
-  handleViewportChange();
-
-  return () => {
-    window.visualViewport?.removeEventListener('resize', handleViewportChange);
-    window.visualViewport?.removeEventListener('scroll', handleViewportChange);
-  };
-}, []);
-
-// Funzione aggiuntiva per forzare la posizione al focus
-const handleInputFocus = () => {
-  // Piccolo delay per aspettare che la tastiera inizi a salire
-  setTimeout(() => {
-    window.scrollTo(0, 0);
-    document.body.scrollTop = 0;
-    scrollToBottom();
-  }, 100);
-};
+  // NOTA: La logica VisualViewport è stata spostata in App.tsx per essere globale.
 
   useEffect(() => { activeRoomIdRef.current = activeRoomId; }, [activeRoomId]);
   useEffect(() => { if (user) loadRoomsAndSync(); }, [user]);
@@ -197,10 +167,10 @@ const handleInputFocus = () => {
   const isAdmin = user?.email === 'info@luigicopertino.it' || user?.email === 'unixgigi@gmail.com';
 
   return (
-    <div className="h-screen-dynamic w-full flex bg-gray-950 text-white overflow-hidden font-sans relative">
+    <div className="h-full w-full flex bg-gray-950 text-white overflow-hidden font-sans relative">
       
-      {/* SIDEBAR CON SAFE AREA iOS */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} pt-[env(safe-area-inset-top)]`}>
+      {/* SIDEBAR: Pulita (il notch è gestito dall'app-shell) */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
           <div className="p-6 flex items-center justify-between border-b border-gray-800 bg-gray-900">
             <div className="flex items-center gap-2">
@@ -225,7 +195,7 @@ const handleInputFocus = () => {
             ))}
           </div>
 
-          <div className="p-4 border-t border-gray-800 space-y-1 bg-gray-950/50 pb-[env(safe-area-inset-bottom)]">
+          <div className="p-4 border-t border-gray-800 space-y-1 bg-gray-950/50">
             {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10"><ShieldCheck className="h-4 w-4 mr-2" /> Admin</Button>}
             <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-400 font-bold hover:bg-gray-800 hover:text-white transition-colors"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
             <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
@@ -236,8 +206,8 @@ const handleInputFocus = () => {
       {isSidebarOpen && <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsSidebarOpen(false)} />}
 
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950 h-full relative">
-        {/* HEADER CON SAFE AREA iOS */}
-        <header className="h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-4 flex items-center justify-between sticky top-0 z-30">
+        {/* HEADER: Pulito (altezza fissa h-16) */}
+        <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-4 flex items-center justify-between sticky top-0 z-30 flex-shrink-0">
           <div className="flex items-center gap-3 overflow-hidden">
             <Button variant="ghost" size="icon" className="md:hidden text-gray-400" onClick={() => setIsSidebarOpen(true)}><Menu /></Button>
             <div className="flex flex-col text-left overflow-hidden">
@@ -256,6 +226,7 @@ const handleInputFocus = () => {
           </div>
         </header>
 
+        {/* AREA MESSAGGI */}
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar">
           {messages.map((m, index) => {
             const currentDate = new Date(m.created_at);
@@ -290,10 +261,10 @@ const handleInputFocus = () => {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* INPUT AREA CON SAFE AREA INFERIORE */}
-        {/* AREA INPUT: Rimuovi 'sticky' e usa 'relative' o 'static' */}
-<div className="p-4 md:p-6 bg-gray-950 border-t border-gray-800 bg-opacity-100 pb-[max(1rem,env(safe-area-inset-bottom))]">
-  <form onSubmit={handleSend} className="max-w-4xl mx-auto flex gap-2 items-center relative">
+        {/* AREA INPUT: Senza padding bottom manuale (gestito dall'app-shell) */}
+        <div className="p-4 md:p-6 bg-gray-950 border-t border-gray-800 sticky bottom-0 z-30">
+          <form onSubmit={handleSend} className="max-w-4xl mx-auto flex gap-2 items-center relative">
+            
             {showEmojiPicker && (
               <div className="absolute bottom-[120%] left-0 z-50 p-2 bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl grid grid-cols-5 gap-1 animate-in slide-in-from-bottom-2">
                 {EMOJIS.map(emoji => (
@@ -301,14 +272,25 @@ const handleInputFocus = () => {
                 ))}
               </div>
             )}
+
             <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
+
             <div className="flex gap-1">
               <Button type="button" variant="ghost" size="icon" disabled={isUploading || isSelectionMode} onClick={() => fileInputRef.current?.click()} className="text-gray-400 hover:text-white">
                 {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" />}
               </Button>
               <Button type="button" variant="ghost" size="icon" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`text-gray-400 hover:text-white ${showEmojiPicker ? 'text-violet-400 bg-gray-900' : ''}`}><Smile className="h-5 w-5" /></Button>
             </div>
-            <Textarea onFocus={handleInputFocus} value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Messaggio..." disabled={isSelectionMode || !activeRoomId || isUploading} className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] h-12 max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(e); } }} />
+
+            <Textarea 
+              value={newMessage} 
+              onChange={(e) => setNewMessage(e.target.value)} 
+              onFocus={() => { if(window.innerWidth < 768) window.scrollTo(0, 0); }}
+              placeholder="Messaggio..." 
+              disabled={isSelectionMode || !activeRoomId || isUploading} 
+              className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] h-12 max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" 
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(e); } }} 
+            />
             <Button type="submit" disabled={loading || !newMessage.trim() || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-xl h-12 w-12 flex-shrink-0 shadow-lg flex items-center justify-center p-0"><Send className="h-5 w-5" /></Button>
           </form>
         </div>
