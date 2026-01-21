@@ -9,7 +9,7 @@ import { AddRoomModal } from '@/components/AddRoomModal';
 import { chatWithAI } from '@/lib/ai-service';
 import { 
   Send, Sparkles, Code, Settings, LogOut, Plus, Hash, 
-  MessageSquare, ShieldCheck, Loader2, Menu, X, Copy, ChevronRight 
+  MessageSquare, ShieldCheck, Loader2, Menu, X, Copy 
 } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
