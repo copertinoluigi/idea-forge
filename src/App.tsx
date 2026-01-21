@@ -18,10 +18,9 @@ function AppContent() {
   const { user, profile, loading } = useAuth();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [currentView, setCurrentView] = useState<'chat' | 'settings' | 'admin'>('chat');
-  
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [summarySidebarOpen, setSummarySidebarOpen] = useState(false);
   const [developModalOpen, setDevelopModalOpen] = useState(false);
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [pendingMessages, setPendingMessages] = useState<any[]>([]);
   const { toast } = useToast();
@@ -37,73 +36,42 @@ function AppContent() {
     try {
       const { data: room } = await supabase.from('rooms').select('*').eq('id', activeRoomId).single();
       const { data: sums } = await supabase.from('summaries').select('content').in('id', selectedSummaryIds);
-      
       const result = await summarizeConversation({
         messages: pendingMessages.map(m => ({ user: 'Member', content: m.content })),
         previousSummaries: sums?.map(s => s.content) || [],
         provider: room?.ai_provider || 'google-flash',
         apiKey: room?.encrypted_api_key || profile?.encrypted_api_key || ''
       });
-
       const timestamp = new Date().toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-      await supabase.from('summaries').insert({ room_id: activeRoomId, title: `Analisi ${timestamp}`, content: result });
+      await supabase.from('summaries').insert({ room_id: activeRoomId, title: `Snapshot ${timestamp}`, content: result });
       toast({ title: "Analisi completata" });
       setSummarySidebarOpen(false);
     } catch (err: any) {
       toast({ title: "Errore AI", description: err.message, variant: "destructive" });
-    } finally {
-      setIsSummarizing(false);
-      setPendingMessages([]);
-    }
+    } finally { setIsSummarizing(false); setPendingMessages([]); }
   };
 
-  // --- RENDERING STRATEGICO ---
-
-  // 1. Caricamento AUTH (Sessione Supabase)
+  // Caricamento Fail-Safe
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-950 text-white">
+      <div className="h-screen flex items-center justify-center bg-gray-950">
         <div className="text-center space-y-4">
           <Loader2 className="h-10 w-10 text-violet-500 animate-spin mx-auto" />
-          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em]">IdeaForge Booting...</p>
+          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em]">BYOI Sincronizzazione...</p>
         </div>
       </div>
     );
   }
 
-  // 2. Utente non loggato
-  if (!user) {
-    return authMode === 'login' ? (
-      <Login onToggleMode={() => setAuthMode('register')} />
-    ) : (
-      <Register onToggleMode={() => setAuthMode('login')} />
-    );
-  }
+  if (!user) return authMode === 'login' ? <Login onToggleMode={() => setAuthMode('register')} /> : <Register onToggleMode={() => setAuthMode('login')} />;
+  
+  // Se il profilo sta ancora caricando ma l'auth c'è, attendiamo un secondo
+  if (user && !profile) return <div className="h-screen flex items-center justify-center bg-gray-950"><Loader2 className="animate-spin text-violet-500" /></div>;
 
-  // 3. Utente loggato ma PROFILO ancora in caricamento dal DB
-  if (!profile) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-gray-950 text-white">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-8 w-8 text-violet-400 animate-spin mx-auto" />
-          <p className="text-gray-500 text-[10px] font-black tracking-widest animate-pulse">Sincronizzazione Profilo...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // 4. Setup obbligatorio
-  if (profile.has_completed_setup === false) {
-    return <Setup />;
-  }
-
-  // 5. Router Viste Speciali
+  if (profile && profile.has_completed_setup === false) return <Setup />;
   if (currentView === 'settings') return <Settings onBack={() => setCurrentView('chat')} />;
-  if (currentView === 'admin' && (user.email === 'info@luigicopertino.it' || user.email === 'unixgigi@gmail.com')) {
-    return <AdminDashboard onBack={() => setCurrentView('chat')} />;
-  }
+  if (currentView === 'admin') return <AdminDashboard onBack={() => setCurrentView('chat')} />;
 
-  // 6. Chat Principale
   return (
     <>
       <Chat
@@ -115,16 +83,10 @@ function AppContent() {
         onDevelop={() => setDevelopModalOpen(true)}
       />
       <SummarySidebar isOpen={summarySidebarOpen} roomId={activeRoomId} onClose={() => { setSummarySidebarOpen(false); setPendingMessages([]); }} onGenerate={handleSummarize} loading={isSummarizing} />
-      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => {}} />
+      <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => { }} />
       <Toaster />
     </>
   );
 }
 
-export default function App() {
-  return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
-  );
-}
+export default function App() { return <AuthProvider><AppContent /></AuthProvider>; }
