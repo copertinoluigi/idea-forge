@@ -23,8 +23,6 @@ export function Setup() {
     setLoading(true);
     
     try {
-      console.log("Inizio salvataggio setup per utente:", user.id);
-      
       const { error } = await supabase
         .from('profiles')
         .update({
@@ -37,13 +35,9 @@ export function Setup() {
         .eq('id', user.id);
 
       if (error) throw error;
-
-      console.log("Database aggiornato, rinfresco profilo...");
       await refreshProfile();
-      
-      toast({ title: 'Configurazione Salvata', description: 'Benvenuto in IdeaForge.' });
+      toast({ title: 'Configurazione Salvata', description: 'Benvenuto in BYOI.' });
     } catch (error: any) {
-      console.error("Setup Error:", error);
       toast({
         title: 'Errore durante il setup',
         description: error.message || 'Verifica la connessione al database.',
@@ -55,13 +49,14 @@ export function Setup() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-950 p-4 font-sans text-left">
+    // h-full invece di min-h-screen per stare dentro l'app-shell
+    <div className="h-full w-full flex items-center justify-center p-4 font-sans text-left overflow-y-auto bg-gray-950">
       <Card className="w-full max-w-md bg-gray-900 border-gray-800 text-white shadow-2xl">
         <CardHeader className="text-center">
           <div className="bg-violet-500/10 w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-4 border border-violet-500/20">
             <Sparkles className="text-violet-400 h-6 w-6" />
           </div>
-          <CardTitle className="text-2xl font-black uppercase italic tracking-tighter">Benvenuto su IdeaForge</CardTitle>
+          <CardTitle className="text-2xl font-black uppercase italic tracking-tighter">Benvenuto su BYOI</CardTitle>
           <CardDescription className="text-gray-500 text-xs">Configura il tuo motore AI predefinito per iniziare.</CardDescription>
         </CardHeader>
         <CardContent>
