@@ -29,28 +29,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data) {
         setProfile(data);
       } else {
-        // Auto-Repair: Se l'utente non ha un profilo, creiamolo
         const { data: newProfile } = await supabase.from('profiles').insert({
           id: userId, email, display_name: email.split('@')[0], has_completed_setup: false
         }).select().single();
         if (newProfile) setProfile(newProfile);
       }
     } catch (e) {
-      console.error("BYOI Auth Error:", e);
+      console.error("BYOI Auth: Profile Sync Error", e);
     }
   };
 
   useEffect(() => {
     let mounted = true;
+    const timeout = setTimeout(() => { if (mounted && loading) setLoading(false); }, 5000);
+
     const init = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user && mounted) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (mounted) {
+        if (session?.user) {
           setUser(session.user);
           await loadProfile(session.user.id, session.user.email!);
         }
-      } finally {
-        if (mounted) setLoading(false);
+        setLoading(false);
+        clearTimeout(timeout);
       }
     };
     init();
@@ -71,19 +72,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => { mounted = false; subscription.unsubscribe(); };
   }, []);
 
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    localStorage.clear();
-    setUser(null);
-    setProfile(null);
-  };
-
-  const refreshProfile = async () => {
-    if (user) await loadProfile(user.id, user.email!);
-  };
-
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn: async (e, p) => { await supabase.auth.signInWithPassword({ email: e, password: p }) }, signUp: async () => { }, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ 
+      user, profile, loading, 
+      refreshProfile: async () => { if(user) await loadProfile(user.id, user.email!); },
+      signIn: async (e, p) => { await supabase.auth.signInWithPassword({ email: e, password: p }) },
+      signUp: async (e, p, d, i) => { 
+        const { data: invite } = await supabase.from('invites').select('*').eq('code', i).eq('is_used', false).maybeSingle();
+        if (!invite) throw new Error('Invite invalid');
+        const { data: auth } = await supabase.auth.signUp({ email: e, password: p });
+        if (auth.user) {
+          await supabase.from('profiles').insert({ id: auth.user.id, email: e, display_name: d, has_completed_setup: false });
+          await supabase.from('invites').update({ is_used: true, used_by: auth.user.id, used_at: new Date().toISOString() }).eq('id', invite.id);
+        }
+      },
+      signOut: async () => { await supabase.auth.signOut(); localStorage.clear(); }
+    }}>
       {children}
     </AuthContext.Provider>
   );
@@ -91,6 +95,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export const useAuth = () => {
   const c = useContext(AuthContext);
-  if (!c) throw new Error("useAuth must be used within AuthProvider");
+  if (!c) throw new Error("useAuth error");
   return c;
 };
