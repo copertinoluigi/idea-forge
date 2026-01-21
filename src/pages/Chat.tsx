@@ -291,8 +291,9 @@ const handleInputFocus = () => {
         </div>
 
         {/* INPUT AREA CON SAFE AREA INFERIORE */}
-        <div className="p-4 md:p-6 bg-gray-950 border-t border-gray-800 sticky bottom-0 z-30 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <form onSubmit={handleSend} className="max-w-4xl mx-auto flex gap-2 items-center relative">
+        {/* AREA INPUT: Rimuovi 'sticky' e usa 'relative' o 'static' */}
+<div className="p-4 md:p-6 bg-gray-950 border-t border-gray-800 bg-opacity-100 pb-[max(1rem,env(safe-area-inset-bottom))]">
+  <form onSubmit={handleSend} className="max-w-4xl mx-auto flex gap-2 items-center relative">
             {showEmojiPicker && (
               <div className="absolute bottom-[120%] left-0 z-50 p-2 bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl grid grid-cols-5 gap-1 animate-in slide-in-from-bottom-2">
                 {EMOJIS.map(emoji => (
@@ -307,7 +308,7 @@ const handleInputFocus = () => {
               </Button>
               <Button type="button" variant="ghost" size="icon" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`text-gray-400 hover:text-white ${showEmojiPicker ? 'text-violet-400 bg-gray-900' : ''}`}><Smile className="h-5 w-5" /></Button>
             </div>
-            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Messaggio..." disabled={isSelectionMode || !activeRoomId || isUploading} className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] h-12 max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(e); } }} />
+            <Textarea onFocus={handleInputFocus} value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Messaggio..." disabled={isSelectionMode || !activeRoomId || isUploading} className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] h-12 max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(e); } }} />
             <Button type="submit" disabled={loading || !newMessage.trim() || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-xl h-12 w-12 flex-shrink-0 shadow-lg flex items-center justify-center p-0"><Send className="h-5 w-5" /></Button>
           </form>
         </div>
