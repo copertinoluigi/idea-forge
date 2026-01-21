@@ -9,7 +9,7 @@ interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
-  profileLoading: boolean; // Nuovo: separiamo il loading del profilo
+  profileLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName: string, inviteCode: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -24,12 +24,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
   
-  // Ref per prevenire race conditions
   const isLoadingProfile = useRef(false);
-  const loadingTimeout = useRef<NodeJS.Timeout | null>(null);
+  const authTimeout = useRef<NodeJS.Timeout | null>(null);
+  const profileTimeout = useRef<NodeJS.Timeout | null>(null); // NUOVO
 
   const loadProfile = async (userId: string, email: string, isInitialLoad = false) => {
-    // Previeni chiamate duplicate
     if (isLoadingProfile.current) {
       console.log('⏭️ BYOI: Profile load già in corso, skip');
       return;
@@ -40,12 +39,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     console.log('🔄 BYOI: Profile fetch started per', email);
 
+    // CRITICO: Timeout di sicurezza per il caricamento profilo
+    profileTimeout.current = setTimeout(() => {
+      console.error('⏱️ BYOI: Profile fetch timeout (3s), forzatura profileLoading=false');
+      setProfileLoading(false);
+      isLoadingProfile.current = false;
+    }, 3000); // 3 secondi per il profilo
+
     try {
+      // DEBUG: Log query per vedere cosa succede
+      console.log('🔍 BYOI: Executing query profiles WHERE id =', userId);
+      
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
+      
+      console.log('📦 BYOI: Query result:', { data, error });
+
+      // Pulizia timeout se la fetch completa prima
+      if (profileTimeout.current) {
+        clearTimeout(profileTimeout.current);
+      }
 
       if (error) {
         console.error('❌ BYOI: Profile fetch error', error);
@@ -78,13 +94,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       console.error('💥 BYOI: Errore critico nel caricamento profilo', err);
-      // Non bloccare l'app: l'utente può comunque vedere la UI
       setProfile(null);
     } finally {
       isLoadingProfile.current = false;
       setProfileLoading(false);
       
-      // Se è il caricamento iniziale, sblocchiamo il loading globale
       if (isInitialLoad) {
         console.log('🏁 BYOI: Auth loading completato');
         setLoading(false);
@@ -98,13 +112,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function initAuth() {
       console.log('🚀 BYOI: Init auth started');
       
-      // Timeout di sicurezza: dopo 5 secondi sblocchiamo comunque
-      loadingTimeout.current = setTimeout(() => {
+      // Timeout globale: dopo 8 secondi sblocchiamo tutto
+      authTimeout.current = setTimeout(() => {
         if (mounted) {
-          console.warn('⏱️ BYOI: Timeout raggiunto, forzatura loading=false');
+          console.error('⏱️ BYOI: Auth timeout globale (8s), forzatura loading=false');
           setLoading(false);
+          setProfileLoading(false);
         }
-      }, 5000);
+      }, 8000);
 
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -114,7 +129,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (session?.user) {
           console.log('👤 BYOI: Sessione trovata per', session.user.email);
           setUser(session.user);
-          // CRITICO: isInitialLoad=true per sbloccare loading dopo fetch
           await loadProfile(session.user.id, session.user.email!, true);
         } else {
           console.log('🚫 BYOI: Nessuna sessione attiva');
@@ -124,23 +138,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error('💥 BYOI: Init auth error', e);
         if (mounted) setLoading(false);
       } finally {
-        // Pulizia timeout
-        if (loadingTimeout.current) {
-          clearTimeout(loadingTimeout.current);
+        if (authTimeout.current) {
+          clearTimeout(authTimeout.current);
         }
       }
     }
 
     initAuth();
 
-    // Listener per cambio stato (login/logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔔 BYOI: Auth state change ->', event);
       
       if (!mounted) return;
 
-      // CRITICO: Non ricaricare il profilo se l'evento è INITIAL_SESSION
-      // (viene già gestito da initAuth)
       if (event === 'INITIAL_SESSION') {
         console.log('⏭️ BYOI: INITIAL_SESSION già gestita, skip');
         return;
@@ -148,7 +158,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (session?.user) {
         setUser(session.user);
-        // isInitialLoad=false perché non è il primo caricamento
         await loadProfile(session.user.id, session.user.email!, false);
       } else {
         console.log('👋 BYOI: Logout/session cleared');
@@ -162,9 +171,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       console.log('🧹 BYOI: AuthContext cleanup');
       mounted = false;
-      if (loadingTimeout.current) {
-        clearTimeout(loadingTimeout.current);
-      }
+      if (authTimeout.current) clearTimeout(authTimeout.current);
+      if (profileTimeout.current) clearTimeout(profileTimeout.current);
       subscription.unsubscribe();
     };
   }, []);
