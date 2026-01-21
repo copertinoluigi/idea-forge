@@ -24,29 +24,9 @@ export interface Database {
         Update: { title?: string; content?: string; }
       }
       messages: {
-        Row: { 
-          id: string; 
-          user_id: string; 
-          room_id: string; 
-          content: string; 
-          created_at: string; 
-          is_system: boolean;
-          attachments: Json | null; // AGGIUNTO CHIRURGICAMENTE
-        }
-        Insert: { 
-          id?: string; 
-          user_id: string; 
-          room_id: string; 
-          content: string; 
-          created_at?: string; 
-          is_system?: boolean;
-          attachments?: Json | null; // AGGIUNTO
-        }
-        Update: { 
-          content?: string; 
-          room_id?: string; 
-          attachments?: Json | null; // AGGIUNTO
-        }
+        Row: { id: string; user_id: string; room_id: string; content: string; created_at: string; is_system: boolean; attachments: Json | null; }
+        Insert: { id?: string; user_id: string; room_id: string; content: string; created_at?: string; is_system?: boolean; attachments?: Json | null; }
+        Update: { content?: string; room_id?: string; attachments?: Json | null; }
       }
       invites: {
         Row: { id: string; code: string; created_by: string | null; used_by: string | null; is_used: boolean; created_at: string; used_at: string | null; }
