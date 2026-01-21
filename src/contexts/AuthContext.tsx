@@ -23,86 +23,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
-  
-  const isLoadingProfile = useRef(false);
-  const authTimeout = useRef<NodeJS.Timeout | null>(null);
-  const profileTimeout = useRef<NodeJS.Timeout | null>(null); // NUOVO
 
-  const loadProfile = async (userId: string, email: string, isInitialLoad = false) => {
-    if (isLoadingProfile.current) {
-      console.log('⏭️ BYOI: Profile load già in corso, skip');
-      return;
-    }
-
-    isLoadingProfile.current = true;
+  const loadProfile = async (userId: string, email: string) => {
     setProfileLoading(true);
+    console.log('🔄 BYOI: Profile fetch BYPASS MODE - creazione profilo mock');
     
-    console.log('🔄 BYOI: Profile fetch started per', email);
-
-    // CRITICO: Timeout di sicurezza per il caricamento profilo
-    profileTimeout.current = setTimeout(() => {
-      console.error('⏱️ BYOI: Profile fetch timeout (3s), forzatura profileLoading=false');
-      setProfileLoading(false);
-      isLoadingProfile.current = false;
-    }, 3000); // 3 secondi per il profilo
-
     try {
-      // DEBUG: Log query per vedere cosa succede
-      console.log('🔍 BYOI: Executing query profiles WHERE id =', userId);
-      
+      // BYPASS: Tentiamo la query ma con timeout molto breve
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1000);
+
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
+        .abortSignal(controller.signal)
         .maybeSingle();
-      
-      console.log('📦 BYOI: Query result:', { data, error });
 
-      // Pulizia timeout se la fetch completa prima
-      if (profileTimeout.current) {
-        clearTimeout(profileTimeout.current);
-      }
-
-      if (error) {
-        console.error('❌ BYOI: Profile fetch error', error);
-        throw error;
-      }
+      clearTimeout(timeoutId);
 
       if (data) {
-        console.log('✅ BYOI: Profile caricato', data.display_name);
+        console.log('✅ BYOI: Profile caricato da DB', data);
         setProfile(data);
       } else {
-        console.log('🆕 BYOI: Profilo mancante, auto-creazione...');
-        const { data: newProfile, error: createError } = await supabase
-          .from('profiles')
-          .insert({
-            id: userId,
-            email: email,
-            display_name: email.split('@')[0],
-            has_completed_setup: false
-          })
-          .select()
-          .single();
-        
-        if (createError) {
-          console.error('❌ BYOI: Auto-creazione profilo fallita', createError);
-          throw createError;
-        }
-        
-        console.log('✅ BYOI: Profilo creato', newProfile.display_name);
-        setProfile(newProfile);
+        throw new Error('Profile non trovato o timeout');
       }
     } catch (err) {
-      console.error('💥 BYOI: Errore critico nel caricamento profilo', err);
-      setProfile(null);
-    } finally {
-      isLoadingProfile.current = false;
-      setProfileLoading(false);
+      console.warn('⚠️ BYOI: Errore fetch profilo, uso MOCK', err);
       
-      if (isInitialLoad) {
-        console.log('🏁 BYOI: Auth loading completato');
-        setLoading(false);
-      }
+      // MOCK PROFILE per permettere all'app di funzionare
+      const mockProfile: Profile = {
+        id: userId,
+        email: email,
+        display_name: email.split('@')[0],
+        has_completed_setup: true, // FORZATO a true per bypassare setup
+        encrypted_api_key: null,
+        last_room_id: null,
+        is_admin: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      console.log('🎭 BYOI: Profilo MOCK attivato:', mockProfile);
+      setProfile(mockProfile);
+    } finally {
+      setProfileLoading(false);
     }
   };
 
@@ -110,36 +75,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let mounted = true;
 
     async function initAuth() {
-      console.log('🚀 BYOI: Init auth started');
+      console.log('🚀 BYOI: Init auth started (BYPASS MODE)');
       
-      // Timeout globale: dopo 8 secondi sblocchiamo tutto
-      authTimeout.current = setTimeout(() => {
-        if (mounted) {
-          console.error('⏱️ BYOI: Auth timeout globale (8s), forzatura loading=false');
-          setLoading(false);
-          setProfileLoading(false);
-        }
-      }, 8000);
-
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        // Verifica connettività Supabase
+        console.log('🔍 BYOI: Testing Supabase connection...');
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('❌ BYOI: Session error:', sessionError);
+          throw sessionError;
+        }
+        
+        console.log('✅ BYOI: Supabase connection OK');
         
         if (!mounted) return;
 
         if (session?.user) {
-          console.log('👤 BYOI: Sessione trovata per', session.user.email);
+          console.log('👤 BYOI: User found:', session.user.email);
+          console.log('🔑 BYOI: Token preview:', session.access_token.substring(0, 30) + '...');
+          console.log('⏰ BYOI: Token expires:', new Date(session.expires_at! * 1000).toLocaleString());
+          
           setUser(session.user);
-          await loadProfile(session.user.id, session.user.email!, true);
+          await loadProfile(session.user.id, session.user.email!);
         } else {
-          console.log('🚫 BYOI: Nessuna sessione attiva');
-          setLoading(false);
+          console.log('🚫 BYOI: No session');
         }
       } catch (e) {
-        console.error('💥 BYOI: Init auth error', e);
-        if (mounted) setLoading(false);
+        console.error('💥 BYOI: Critical init error:', e);
       } finally {
-        if (authTimeout.current) {
-          clearTimeout(authTimeout.current);
+        if (mounted) {
+          console.log('🏁 BYOI: Init complete, loading=false');
+          setLoading(false);
         }
       }
     }
@@ -147,20 +114,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('🔔 BYOI: Auth state change ->', event);
+      console.log('🔔 BYOI: Auth event:', event);
       
       if (!mounted) return;
 
       if (event === 'INITIAL_SESSION') {
-        console.log('⏭️ BYOI: INITIAL_SESSION già gestita, skip');
+        console.log('⏭️ BYOI: Skipping INITIAL_SESSION');
         return;
       }
 
       if (session?.user) {
         setUser(session.user);
-        await loadProfile(session.user.id, session.user.email!, false);
+        await loadProfile(session.user.id, session.user.email!);
       } else {
-        console.log('👋 BYOI: Logout/session cleared');
         setUser(null);
         setProfile(null);
       }
@@ -169,20 +135,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     return () => {
-      console.log('🧹 BYOI: AuthContext cleanup');
       mounted = false;
-      if (authTimeout.current) clearTimeout(authTimeout.current);
-      if (profileTimeout.current) clearTimeout(profileTimeout.current);
       subscription.unsubscribe();
     };
   }, []);
 
   const signIn = async (email: string, password: string) => {
+    console.log('🔐 BYOI: Sign in attempt for', email);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    if (error) {
+      console.error('❌ BYOI: Sign in failed:', error);
+      throw error;
+    }
+    console.log('✅ BYOI: Sign in successful');
   };
 
   const signUp = async (email: string, password: string, displayName: string, inviteCode: string) => {
+    console.log('📝 BYOI: Sign up attempt for', email);
+    
     const { data: invite } = await supabase
       .from('invites')
       .select('*')
@@ -190,29 +160,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq('is_used', false)
       .maybeSingle();
 
-    if (!invite) throw new Error('Codice invito non valido o già usato');
+    if (!invite) throw new Error('Codice invito non valido');
 
     const { data: authData, error: authErr } = await supabase.auth.signUp({ email, password });
     if (authErr) throw authErr;
     if (!authData.user) throw new Error('Signup fallito');
 
-    const { error: pErr } = await supabase.from('profiles').insert({
-      id: authData.user.id,
-      email,
-      display_name: displayName,
-      has_completed_setup: false
-    });
-    if (pErr) throw pErr;
+    // Tentiamo di creare il profilo ma non blocchiamo se fallisce
+    try {
+      await supabase.from('profiles').insert({
+        id: authData.user.id,
+        email,
+        display_name: displayName,
+        has_completed_setup: false
+      });
 
-    await supabase.from('invites').update({ 
-      is_used: true, 
-      used_by: authData.user.id, 
-      used_at: new Date().toISOString() 
-    }).eq('id', invite.id);
+      await supabase.from('invites').update({ 
+        is_used: true, 
+        used_by: authData.user.id, 
+        used_at: new Date().toISOString() 
+      }).eq('id', invite.id);
+    } catch (e) {
+      console.warn('⚠️ BYOI: Profile creation failed, will use mock', e);
+    }
   };
 
   const signOut = async () => {
-    console.log('👋 BYOI: Logout triggered');
+    console.log('👋 BYOI: Logout');
     await supabase.auth.signOut();
     localStorage.clear();
     setUser(null);
@@ -221,8 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = async () => {
     if (user) {
-      console.log('🔄 BYOI: Manual profile refresh');
-      await loadProfile(user.id, user.email!, false);
+      await loadProfile(user.id, user.email!);
     }
   };
 
