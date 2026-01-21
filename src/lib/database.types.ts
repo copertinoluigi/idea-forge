@@ -8,7 +8,7 @@ export interface Database {
           id: string; email: string; display_name: string; encrypted_api_key: string | null;
           ai_provider: string; mcp_endpoint: string | null; has_completed_setup: boolean;
           created_at: string; updated_at: string;
-          last_room_id: string | null; // AGGIUNTO
+          last_room_id: string | null;
         }
         Insert: { id: string; email: string; display_name: string; encrypted_api_key?: string | null; ai_provider?: string; mcp_endpoint?: string | null; has_completed_setup?: boolean; created_at?: string; updated_at?: string; last_room_id?: string | null; }
         Update: { encrypted_api_key?: string | null; ai_provider?: string; mcp_endpoint?: string | null; has_completed_setup?: boolean; last_room_id?: string | null; }
@@ -24,9 +24,29 @@ export interface Database {
         Update: { title?: string; content?: string; }
       }
       messages: {
-        Row: { id: string; user_id: string; room_id: string; content: string; created_at: string; is_system: boolean; }
-        Insert: { id?: string; user_id: string; room_id: string; content: string; created_at?: string; is_system?: boolean; }
-        Update: { content?: string; room_id?: string; }
+        Row: { 
+          id: string; 
+          user_id: string; 
+          room_id: string; 
+          content: string; 
+          created_at: string; 
+          is_system: boolean;
+          attachments: Json | null; // AGGIUNTO CHIRURGICAMENTE
+        }
+        Insert: { 
+          id?: string; 
+          user_id: string; 
+          room_id: string; 
+          content: string; 
+          created_at?: string; 
+          is_system?: boolean;
+          attachments?: Json | null; // AGGIUNTO
+        }
+        Update: { 
+          content?: string; 
+          room_id?: string; 
+          attachments?: Json | null; // AGGIUNTO
+        }
       }
       invites: {
         Row: { id: string; code: string; created_by: string | null; used_by: string | null; is_used: boolean; created_at: string; used_at: string | null; }
