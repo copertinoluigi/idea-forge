@@ -18,7 +18,7 @@ export function ChatMessage({ message, isOwn, isSelectionMode, isSelected, onSel
   if (message.is_system) {
     return (
       <div className="flex justify-center my-2 w-full px-4">
-        <div className="bg-gray-800/40 border border-gray-700/50 rounded-xl px-4 py-2 text-[11px] text-gray-400 text-center leading-relaxed max-w-[90%] italic">
+        <div className="bg-gray-800/40 border border-gray-700/50 rounded-xl px-4 py-2 text-[11px] text-gray-300 text-center leading-relaxed max-w-[90%] font-medium">
           {message.content}
         </div>
       </div>
