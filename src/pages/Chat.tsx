@@ -68,7 +68,9 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     try {
       const { data: memberships } = await supabase.from('room_members').select('rooms (*)').eq('user_email', user.email);
       let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
-      const privateConsole = memberRooms.find(r => r.is_private);
+      
+      // FIX: Usiamo 'let' perché privateConsole deve poter essere riassegnata se la creiamo
+      let privateConsole = memberRooms.find(r => r.is_private);
 
       if (!privateConsole) {
         const { data: newRoom } = await supabase.from('rooms').insert({
@@ -77,7 +79,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         if (newRoom) {
           await supabase.from('room_members').insert({ room_id: newRoom.id, user_email: user.email, user_id: user.id, role: 'owner' });
           memberRooms = [newRoom, ...memberRooms];
-          privateConsole = newRoom;
+          privateConsole = newRoom; // Ora possibile grazie a 'let'
         }
       }
       setRooms(memberRooms);
@@ -136,7 +138,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   return (
     <div className="h-screen w-full flex bg-gray-950 text-white overflow-hidden font-sans relative">
       
-      {/* SIDEBAR (Responsive Drawer) */}
+      {/* SIDEBAR SINISTRA */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
           <div className="p-6 flex items-center justify-between">
@@ -144,18 +146,18 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               <Sparkles className="h-5 w-5 text-violet-400" />
               <h1 className="font-black italic text-xl tracking-widest text-white uppercase">BYOI</h1>
             </div>
-            <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setIsSidebarOpen(false)}><X /></Button>
+            <Button variant="ghost" size="icon" className="md:hidden text-gray-500" onClick={() => setIsSidebarOpen(false)}><X /></Button>
           </div>
 
           <div className="flex-1 overflow-y-auto px-3 space-y-1">
              <div className="flex items-center justify-between px-3 mb-4">
                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</span>
-                <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-6 w-6 hover:text-violet-400"><Plus className="h-4 w-4" /></Button>
+                <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-violet-400"><Plus className="h-4 w-4" /></Button>
              </div>
             {roomsLoading ? (
               <div className="flex justify-center p-4"><Loader2 className="animate-spin h-5 w-5 text-gray-700" /></div>
             ) : rooms.map(room => (
-              <button key={room.id} onClick={() => handleRoomSwitch(room.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40' : 'text-gray-400 hover:bg-gray-800'}`}>
+              <button key={room.id} onClick={() => handleRoomSwitch(room.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'}`}>
                 {room.is_private ? <MessageSquare className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
                 <span className="truncate font-bold tracking-tight">{room.name}</span>
               </button>
@@ -163,9 +165,9 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </div>
 
           <div className="p-4 border-t border-gray-800 space-y-1 bg-gray-950/50">
-            {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10"><ShieldCheck className="h-4 w-4 mr-2" /> Admin</Button>}
-            <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-400 font-bold hover:bg-gray-800 hover:text-white"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
-            <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
+            {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"><ShieldCheck className="h-4 w-4 mr-2" /> Admin</Button>}
+            <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-400 font-bold hover:bg-gray-800 hover:text-white transition-colors"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
+            <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 font-bold hover:bg-red-500/10 hover:text-red-300 transition-colors"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
           </div>
         </div>
       </aside>
@@ -180,14 +182,9 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <Button variant="ghost" size="icon" className="md:hidden text-gray-400" onClick={() => setIsSidebarOpen(true)}><Menu /></Button>
             <div className="flex flex-col text-left">
               <div className="flex items-center gap-2">
-                <h2 className="font-bold text-sm text-white uppercase italic truncate max-w-[120px] md:max-w-none">
-                  {activeRoom?.name || 'BYOI'}
-                </h2>
+                <h2 className="font-bold text-sm text-white uppercase italic truncate max-w-[120px] md:max-w-none">{activeRoom?.name || 'BYOI'}</h2>
                 {!activeRoom?.is_private && activeRoom?.join_code && (
-                  <button 
-                    onClick={copyJoinCode} 
-                    className="bg-gray-800 text-[9px] px-2 py-0.5 rounded text-violet-400 font-mono flex items-center gap-1 border border-gray-700 hover:text-white transition-colors"
-                  >
+                  <button onClick={copyJoinCode} className="bg-gray-800 text-[9px] px-2 py-0.5 rounded text-violet-400 font-mono flex items-center gap-1 border border-gray-700 hover:text-white active:scale-95 transition-all">
                     #{activeRoom.join_code} <Copy className="h-2.5 w-2.5" />
                   </button>
                 )}
@@ -196,12 +193,12 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600 animate-pulse' : 'bg-violet-600'} text-white rounded-full font-black px-3 h-8 text-[9px] uppercase`}><Sparkles className="mr-1 h-3 w-3" /> <span className="hidden xs:inline">{isSelectionMode ? 'Confirm' : 'Summarize'}</span></Button>
-            <Button onClick={onDevelop} disabled={!activeRoom?.mcp_endpoint} size="sm" className="bg-emerald-600 text-white rounded-full font-black px-3 h-8 text-[9px] uppercase"><Code className="mr-1 h-3 w-3" /> <span className="hidden xs:inline">Develop</span></Button>
+            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600 animate-pulse' : 'bg-violet-600 shadow-lg shadow-violet-900/30'} text-white rounded-full font-black px-3 h-8 text-[9px] uppercase`}><Sparkles className="mr-1 h-3 w-3" /> <span className="hidden xs:inline">{isSelectionMode ? 'Confirm' : 'Summarize'}</span></Button>
+            <Button onClick={onDevelop} disabled={!activeRoom?.mcp_endpoint} size="sm" className="bg-emerald-600 text-white rounded-full font-black px-3 h-8 text-[9px] uppercase shadow-lg shadow-emerald-900/30"><Code className="mr-1 h-3 w-3" /> <span className="hidden xs:inline">Develop</span></Button>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar pb-24 md:pb-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 custom-scrollbar pb-24 md:pb-6">
           {messages.map((m) => (
             <ChatMessage 
               key={m.id} 
@@ -222,10 +219,12 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               onChange={(e) => setNewMessage(e.target.value)} 
               placeholder="Messaggio..." 
               disabled={isSelectionMode || !activeRoomId} 
-              className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] max-h-[150px] resize-none text-base py-3" 
+              className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" 
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(e); } }} 
             />
-            <Button type="submit" disabled={loading || !newMessage.trim() || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-xl h-12 w-12 flex-shrink-0 shadow-xl shadow-violet-900/20"><Send className="h-5 w-5" /></Button>
+            <Button type="submit" disabled={loading || !newMessage.trim() || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-xl h-12 w-12 flex-shrink-0 shadow-lg shadow-violet-900/30 transition-transform active:scale-95">
+              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+            </Button>
           </form>
         </div>
       </main>
