@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode, useRef } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
@@ -26,14 +26,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadProfile = async (userId: string, email: string) => {
     setProfileLoading(true);
-    console.log('🔄 BYOI: Profile fetch BYPASS MODE - creazione profilo mock');
+    console.log('🔄 BYOI: Profile fetch started...');
     
     try {
-      // BYPASS: Tentiamo la query ma con timeout molto breve
+      // Timeout di 2 secondi per la query al DB
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1000);
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
 
-      const { data, error } = await supabase
+      const { data, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
@@ -42,29 +42,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       clearTimeout(timeoutId);
 
+      if (profileError) {
+        console.error('❌ BYOI: Errore query profilo:', profileError);
+        throw profileError;
+      }
+
       if (data) {
-        console.log('✅ BYOI: Profile caricato da DB', data);
+        console.log('✅ BYOI: Profile caricato correttamente dal DB', data);
         setProfile(data);
       } else {
-        throw new Error('Profile non trovato o timeout');
+        throw new Error('Profile non trovato nel database');
       }
     } catch (err) {
-      console.warn('⚠️ BYOI: Errore fetch profilo, uso MOCK', err);
+      console.warn('⚠️ BYOI: Errore fetch o timeout. ATTIVAZIONE PROFILO MOCK DI EMERGENZA.', err);
       
-      // MOCK PROFILE per permettere all'app di funzionare
+      // MOCK PROFILE: Allineato esattamente ai tuoi database.types.ts
       const mockProfile: Profile = {
         id: userId,
         email: email,
         display_name: email.split('@')[0],
-        has_completed_setup: true, // FORZATO a true per bypassare setup
+        has_completed_setup: true, // Bypassiamo il setup per testare la chat
         encrypted_api_key: null,
+        ai_provider: 'google-flash',
+        mcp_endpoint: null,
         last_room_id: null,
-        is_admin: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
       
-      console.log('🎭 BYOI: Profilo MOCK attivato:', mockProfile);
+      console.log('🎭 BYOI: Profilo MOCK pronto:', mockProfile);
       setProfile(mockProfile);
     } finally {
       setProfileLoading(false);
@@ -75,11 +81,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let mounted = true;
 
     async function initAuth() {
-      console.log('🚀 BYOI: Init auth started (BYPASS MODE)');
+      console.log('🚀 BYOI: Init auth started');
       
       try {
-        // Verifica connettività Supabase
-        console.log('🔍 BYOI: Testing Supabase connection...');
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
@@ -87,25 +91,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           throw sessionError;
         }
         
-        console.log('✅ BYOI: Supabase connection OK');
-        
         if (!mounted) return;
 
         if (session?.user) {
-          console.log('👤 BYOI: User found:', session.user.email);
-          console.log('🔑 BYOI: Token preview:', session.access_token.substring(0, 30) + '...');
-          console.log('⏰ BYOI: Token expires:', new Date(session.expires_at! * 1000).toLocaleString());
-          
+          console.log('👤 BYOI: Utente loggato:', session.user.email);
           setUser(session.user);
           await loadProfile(session.user.id, session.user.email!);
         } else {
-          console.log('🚫 BYOI: No session');
+          console.log('🚫 BYOI: Nessuna sessione attiva');
         }
       } catch (e) {
-        console.error('💥 BYOI: Critical init error:', e);
+        console.error('💥 BYOI: Errore critico inizializzazione:', e);
       } finally {
         if (mounted) {
-          console.log('🏁 BYOI: Init complete, loading=false');
+          console.log('🏁 BYOI: Caricamento terminato, loading = false');
           setLoading(false);
         }
       }
@@ -114,14 +113,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('🔔 BYOI: Auth event:', event);
+      console.log('🔔 BYOI: Evento Auth rilevato:', event);
       
       if (!mounted) return;
-
-      if (event === 'INITIAL_SESSION') {
-        console.log('⏭️ BYOI: Skipping INITIAL_SESSION');
-        return;
-      }
 
       if (session?.user) {
         setUser(session.user);
@@ -141,52 +135,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    console.log('🔐 BYOI: Sign in attempt for', email);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      console.error('❌ BYOI: Sign in failed:', error);
-      throw error;
-    }
-    console.log('✅ BYOI: Sign in successful');
+    if (error) throw error;
   };
 
   const signUp = async (email: string, password: string, displayName: string, inviteCode: string) => {
-    console.log('📝 BYOI: Sign up attempt for', email);
-    
-    const { data: invite } = await supabase
-      .from('invites')
-      .select('*')
-      .eq('code', inviteCode)
-      .eq('is_used', false)
-      .maybeSingle();
-
+    const { data: invite } = await supabase.from('invites').select('*').eq('code', inviteCode).eq('is_used', false).maybeSingle();
     if (!invite) throw new Error('Codice invito non valido');
 
     const { data: authData, error: authErr } = await supabase.auth.signUp({ email, password });
     if (authErr) throw authErr;
     if (!authData.user) throw new Error('Signup fallito');
 
-    // Tentiamo di creare il profilo ma non blocchiamo se fallisce
-    try {
-      await supabase.from('profiles').insert({
-        id: authData.user.id,
-        email,
-        display_name: displayName,
-        has_completed_setup: false
-      });
+    await supabase.from('profiles').insert({
+      id: authData.user.id,
+      email,
+      display_name: displayName,
+      has_completed_setup: false
+    });
 
-      await supabase.from('invites').update({ 
-        is_used: true, 
-        used_by: authData.user.id, 
-        used_at: new Date().toISOString() 
-      }).eq('id', invite.id);
-    } catch (e) {
-      console.warn('⚠️ BYOI: Profile creation failed, will use mock', e);
-    }
+    await supabase.from('invites').update({ is_used: true, used_by: authData.user.id, used_at: new Date().toISOString() }).eq('id', invite.id);
   };
 
   const signOut = async () => {
-    console.log('👋 BYOI: Logout');
     await supabase.auth.signOut();
     localStorage.clear();
     setUser(null);
@@ -194,21 +165,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshProfile = async () => {
-    if (user) {
-      await loadProfile(user.id, user.email!);
-    }
+    if (user) await loadProfile(user.id, user.email!);
   };
 
   return (
     <AuthContext.Provider value={{ 
-      user, 
-      profile, 
-      loading, 
-      profileLoading,
-      signIn, 
-      signUp, 
-      signOut, 
-      refreshProfile 
+      user, profile, loading, profileLoading, signIn, signUp, signOut, refreshProfile 
     }}>
       {children}
     </AuthContext.Provider>
@@ -217,8 +179,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (context === undefined) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 }
