@@ -18,7 +18,6 @@ import type { Database } from '@/lib/database.types';
 type Message = Database['public']['Tables']['messages']['Row'] & { profiles: { display_name: string } | null };
 type Room = Database['public']['Tables']['rooms']['Row'];
 
-// STEP C: Native Emoji List
 const EMOJIS = ["😊", "😂", "🚀", "💡", "🔥", "✅", "❌", "🤔", "👍", "🎨", "💻", "🤖", "📈", "📅", "🔒", "✨", "🎯", "📝", "🌍", "⚡"];
 
 interface ChatProps {
@@ -40,8 +39,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [isAddRoomOpen, setIsAddRoomOpen] = useState(false);
-  
-  // Nuovi stati per Media ed Emoji
   const [isUploading, setIsUploading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -50,6 +47,23 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomIdRef = useRef(activeRoomId);
+
+  // FIX iOS: Gestione dinamica altezza viewport per evitare spazio bianco tastiera
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.visualViewport) {
+        const height = window.visualViewport.height;
+        document.documentElement.style.setProperty('--vh', `${height}px`);
+      }
+    };
+    window.visualViewport?.addEventListener('resize', handleResize);
+    window.visualViewport?.addEventListener('scroll', handleResize);
+    handleResize();
+    return () => {
+      window.visualViewport?.removeEventListener('resize', handleResize);
+      window.visualViewport?.removeEventListener('scroll', handleResize);
+    };
+  }, []);
 
   useEffect(() => { activeRoomIdRef.current = activeRoomId; }, [activeRoomId]);
   useEffect(() => { if (user) loadRoomsAndSync(); }, [user]);
@@ -72,25 +86,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     return () => { supabase.removeChannel(channel); };
   }, [activeRoomId]);
 
-  useEffect(() => {
-  const handleResize = () => {
-    if (window.visualViewport) {
-      // Forza l'altezza della main area a quella del viewport visibile (senza tastiera)
-      const height = window.visualViewport.height;
-      document.documentElement.style.setProperty('--vh', `${height}px`);
-    }
-  };
-
-  window.visualViewport?.addEventListener('resize', handleResize);
-  window.visualViewport?.addEventListener('scroll', handleResize);
-  handleResize();
-
-  return () => {
-    window.visualViewport?.removeEventListener('resize', handleResize);
-    window.visualViewport?.removeEventListener('scroll', handleResize);
-  };
-}, []);
-  
   const loadRoomsAndSync = async () => {
     if (!user) return;
     setRoomsLoading(true);
@@ -148,7 +143,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     } finally { setLoading(false); }
   };
 
-  // STEP B: Upload Immagini
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !activeRoomId || !user) return;
@@ -157,16 +151,11 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       const fileExt = file.name.split('.').pop();
       const fileName = `${Math.random().toString(36).slice(2)}_${Date.now()}.${fileExt}`;
       const filePath = `${activeRoomId}/${fileName}`;
-
       const { error: upErr } = await supabase.storage.from('room-assets').upload(filePath, file);
       if (upErr) throw upErr;
-
       const { data: { publicUrl } } = supabase.storage.from('room-assets').getPublicUrl(filePath);
-
       await supabase.from('messages').insert({
-        user_id: user.id,
-        room_id: activeRoomId,
-        content: "",
+        user_id: user.id, room_id: activeRoomId, content: "",
         attachments: [{ url: publicUrl, name: file.name, type: file.type }] as any
       });
     } catch (err) {
@@ -190,9 +179,10 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const isAdmin = user?.email === 'info@luigicopertino.it' || user?.email === 'unixgigi@gmail.com';
 
   return (
-    <div className="h-screen w-full flex bg-gray-950 text-white overflow-hidden font-sans relative">
+    <div className="h-screen-dynamic w-full flex bg-gray-950 text-white overflow-hidden font-sans relative">
       
-      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 pt-[env(safe-area-inset-top)] transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      {/* SIDEBAR CON SAFE AREA iOS */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} pt-[env(safe-area-inset-top)]`}>
         <div className="flex flex-col h-full">
           <div className="p-6 flex items-center justify-between border-b border-gray-800 bg-gray-900">
             <div className="flex items-center gap-2">
@@ -217,7 +207,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             ))}
           </div>
 
-          <div className="p-4 border-t border-gray-800 space-y-1 bg-gray-950/50">
+          <div className="p-4 border-t border-gray-800 space-y-1 bg-gray-950/50 pb-[env(safe-area-inset-bottom)]">
             {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10"><ShieldCheck className="h-4 w-4 mr-2" /> Admin</Button>}
             <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-400 font-bold hover:bg-gray-800 hover:text-white transition-colors"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
             <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
@@ -228,6 +218,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       {isSidebarOpen && <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsSidebarOpen(false)} />}
 
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950 h-full relative">
+        {/* HEADER CON SAFE AREA iOS */}
         <header className="h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-4 flex items-center justify-between sticky top-0 z-30">
           <div className="flex items-center gap-3 overflow-hidden">
             <Button variant="ghost" size="icon" className="md:hidden text-gray-400" onClick={() => setIsSidebarOpen(true)}><Menu /></Button>
@@ -247,7 +238,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar pb-32">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar">
           {messages.map((m, index) => {
             const currentDate = new Date(m.created_at);
             const previousDate = index > 0 ? new Date(messages[index - 1].created_at) : null;
@@ -281,57 +272,24 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           <div ref={messagesEndRef} />
         </div>
 
-        {/* INPUT AREA DEFINITIVA */}
+        {/* INPUT AREA CON SAFE AREA INFERIORE */}
         <div className="p-4 md:p-6 bg-gray-950 border-t border-gray-800 sticky bottom-0 z-30 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <form onSubmit={handleSend} className="max-w-4xl mx-auto flex gap-2 items-center relative">
-            
             {showEmojiPicker && (
               <div className="absolute bottom-[120%] left-0 z-50 p-2 bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl grid grid-cols-5 gap-1 animate-in slide-in-from-bottom-2">
                 {EMOJIS.map(emoji => (
-                  <button 
-                    key={emoji} 
-                    type="button" 
-                    onClick={() => setNewMessage(p => p + emoji)} 
-                    className="w-10 h-10 flex items-center justify-center text-xl hover:bg-gray-800 rounded-lg transition-colors"
-                  >
-                    {emoji}
-                  </button>
+                  <button key={emoji} type="button" onClick={() => setNewMessage(p => p + emoji)} className="w-10 h-10 flex items-center justify-center text-xl hover:bg-gray-800 rounded-lg transition-colors">{emoji}</button>
                 ))}
               </div>
             )}
-
             <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
-
             <div className="flex gap-1">
-              <Button 
-                type="button" 
-                variant="ghost" 
-                size="icon" 
-                disabled={isUploading || isSelectionMode}
-                onClick={() => fileInputRef.current?.click()}
-                className="text-gray-400 hover:text-white"
-              >
+              <Button type="button" variant="ghost" size="icon" disabled={isUploading || isSelectionMode} onClick={() => fileInputRef.current?.click()} className="text-gray-400 hover:text-white">
                 {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" />}
               </Button>
-              <Button 
-                type="button" 
-                variant="ghost" 
-                size="icon" 
-                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                className={`text-gray-400 hover:text-white ${showEmojiPicker ? 'text-violet-400 bg-gray-900' : ''}`}
-              >
-                <Smile className="h-5 w-5" />
-              </Button>
+              <Button type="button" variant="ghost" size="icon" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`text-gray-400 hover:text-white ${showEmojiPicker ? 'text-violet-400 bg-gray-900' : ''}`}><Smile className="h-5 w-5" /></Button>
             </div>
-
-            <Textarea 
-              value={newMessage} 
-              onChange={(e) => setNewMessage(e.target.value)} 
-              placeholder="Messaggio..." 
-              disabled={isSelectionMode || !activeRoomId || isUploading} 
-              className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] h-12 max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" 
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(e); } }} 
-            />
+            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Messaggio..." disabled={isSelectionMode || !activeRoomId || isUploading} className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] h-12 max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(e); } }} />
             <Button type="submit" disabled={loading || !newMessage.trim() || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-xl h-12 w-12 flex-shrink-0 shadow-lg flex items-center justify-center p-0"><Send className="h-5 w-5" /></Button>
           </form>
         </div>
