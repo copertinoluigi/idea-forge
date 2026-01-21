@@ -72,6 +72,25 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     return () => { supabase.removeChannel(channel); };
   }, [activeRoomId]);
 
+  useEffect(() => {
+  const handleResize = () => {
+    if (window.visualViewport) {
+      // Forza l'altezza della main area a quella del viewport visibile (senza tastiera)
+      const height = window.visualViewport.height;
+      document.documentElement.style.setProperty('--vh', `${height}px`);
+    }
+  };
+
+  window.visualViewport?.addEventListener('resize', handleResize);
+  window.visualViewport?.addEventListener('scroll', handleResize);
+  handleResize();
+
+  return () => {
+    window.visualViewport?.removeEventListener('resize', handleResize);
+    window.visualViewport?.removeEventListener('scroll', handleResize);
+  };
+}, []);
+  
   const loadRoomsAndSync = async () => {
     if (!user) return;
     setRoomsLoading(true);
@@ -173,7 +192,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   return (
     <div className="h-screen w-full flex bg-gray-950 text-white overflow-hidden font-sans relative">
       
-      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 pt-[env(safe-area-inset-top)] transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
           <div className="p-6 flex items-center justify-between border-b border-gray-800 bg-gray-900">
             <div className="flex items-center gap-2">
@@ -209,7 +228,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       {isSidebarOpen && <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsSidebarOpen(false)} />}
 
       <main className="flex-1 flex flex-col min-w-0 bg-gray-950 h-full relative">
-        <header className="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-4 flex items-center justify-between sticky top-0 z-30">
+        <header className="h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] border-b border-gray-800 bg-gray-900/50 backdrop-blur-xl px-4 flex items-center justify-between sticky top-0 z-30">
           <div className="flex items-center gap-3 overflow-hidden">
             <Button variant="ghost" size="icon" className="md:hidden text-gray-400" onClick={() => setIsSidebarOpen(true)}><Menu /></Button>
             <div className="flex flex-col text-left overflow-hidden">
