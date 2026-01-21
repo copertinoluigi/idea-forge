@@ -9,9 +9,10 @@ import { AddRoomModal } from '@/components/AddRoomModal';
 import { chatWithAI } from '@/lib/ai-service';
 import { format, isToday, isYesterday } from 'date-fns';
 import { it } from 'date-fns/locale';
+import EmojiPicker, { Theme } from 'emoji-picker-react'; // STEP C
 import { 
   Send, Sparkles, Code, Settings, LogOut, Plus, Hash, 
-  MessageSquare, ShieldCheck, Loader2, Menu, X
+  MessageSquare, ShieldCheck, Loader2, Menu, X, Paperclip, Smile
 } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
@@ -37,6 +38,11 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [isAddRoomOpen, setIsAddRoomOpen] = useState(false);
+  
+  // STEP B & C: Nuovi stati e ref
+  const [isUploading, setIsUploading] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const { user, profile, signOut, refreshProfile } = useAuth();
   const { toast } = useToast();
@@ -109,6 +115,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     if (!newMessage.trim() || !user || !activeRoomId || loading) return;
     const content = newMessage.trim();
     setNewMessage('');
+    setShowEmojiPicker(false);
     setLoading(true);
     try {
       await supabase.from('messages').insert({ user_id: user.id, content, room_id: activeRoomId });
@@ -118,6 +125,59 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         await supabase.from('messages').insert({ user_id: user.id, content: reply, room_id: activeRoomId, is_system: true });
       }
     } finally { setLoading(false); }
+  };
+
+  // STEP B: Logica di Caricamento Immagine
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeRoomId || !user) return;
+
+    try {
+      setIsUploading(true);
+      setShowEmojiPicker(false);
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random().toString(36).slice(2)}_${Date.now()}.${fileExt}`;
+      const filePath = `${activeRoomId}/${fileName}`;
+
+      // 1. Upload su Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('room-assets')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // 2. Ottieni URL Pubblico
+      const { data: { publicUrl } } = supabase.storage
+        .from('room-assets')
+        .getPublicUrl(filePath);
+
+      const attachment = {
+        url: publicUrl,
+        name: file.name,
+        type: file.type
+      };
+
+      // 3. Inserisci messaggio nel DB con l'allegato
+      await supabase.from('messages').insert({
+        user_id: user.id,
+        room_id: activeRoomId,
+        content: "", // Messaggio vuoto per l'immagine
+        attachments: [attachment] as any
+      });
+
+    } catch (error) {
+      console.error("Upload error:", error);
+      toast({ title: "Errore", description: "Impossibile caricare l'immagine", variant: "destructive" });
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  // STEP C: Inserimento Emoji
+  const onEmojiClick = (emojiData: any) => {
+    setNewMessage(prev => prev + emojiData.emoji);
   };
 
   const copyJoinCode = () => {
@@ -135,7 +195,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   return (
     <div className="h-screen w-full flex bg-gray-950 text-white overflow-hidden font-sans relative">
       
-      {/* SIDEBAR SINISTRA */}
+      {/* SIDEBAR SINISTRA (Invariata) */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
           <div className="p-6 flex items-center justify-between border-b border-gray-800 bg-gray-900">
@@ -227,13 +287,55 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           <div ref={messagesEndRef} />
         </div>
 
+        {/* CONTENITORE INPUT CON UPLOAD ED EMOJI */}
         <div className="p-4 md:p-6 bg-gray-950 border-t border-gray-800 sticky bottom-0 z-30">
-          <form onSubmit={handleSend} className="max-w-4xl mx-auto flex gap-3 items-center">
+          <form onSubmit={handleSend} className="max-w-4xl mx-auto flex gap-2 items-center relative">
+            
+            {/* Popover Emoji */}
+            {showEmojiPicker && (
+              <div className="absolute bottom-[110%] left-0 z-50 animate-in fade-in slide-in-from-bottom-2">
+                <EmojiPicker theme={Theme.DARK} onEmojiClick={onEmojiClick} />
+              </div>
+            )}
+
+            {/* Input file nascosto */}
+            <input 
+              type="file" 
+              accept="image/*" 
+              className="hidden" 
+              ref={fileInputRef} 
+              onChange={handleFileChange} 
+            />
+
+            {/* Pulsanti Graffetta e Faccina */}
+            <div className="flex items-center gap-1">
+              <Button 
+                type="button" 
+                variant="ghost" 
+                size="icon" 
+                className="text-gray-400 hover:text-white hover:bg-gray-800"
+                disabled={isUploading || isSelectionMode} 
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" />}
+              </Button>
+              <Button 
+                type="button" 
+                variant="ghost" 
+                size="icon" 
+                className={`text-gray-400 hover:text-white hover:bg-gray-800 ${showEmojiPicker ? 'bg-gray-800 text-white' : ''}`}
+                disabled={isUploading || isSelectionMode}
+                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+              >
+                <Smile className="h-5 w-5" />
+              </Button>
+            </div>
+
             <Textarea 
               value={newMessage} 
               onChange={(e) => setNewMessage(e.target.value)} 
               placeholder="Messaggio..." 
-              disabled={isSelectionMode || !activeRoomId} 
+              disabled={isSelectionMode || !activeRoomId || isUploading} 
               className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] h-12 max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" 
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(e); } }} 
             />
