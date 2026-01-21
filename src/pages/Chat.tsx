@@ -33,7 +33,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [isAddRoomOpen, setIsAddRoomOpen] = useState(false);
   
-  const { user, profile, signOut, refreshProfile } = useAuth();
+  // Rimosso 'refreshProfile' per TS6133
+  const { user, profile, signOut } = useAuth();
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomIdRef = useRef(activeRoomId);
@@ -43,10 +44,15 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   useEffect(() => {
     if (!activeRoomId) return;
+    setMessages([]);
     loadMessages(activeRoomId);
     const channel = supabase.channel(`room-fixed-${activeRoomId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${activeRoomId}` }, 
-      async (payload) => {
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'messages', 
+        filter: `room_id=eq.${activeRoomId}` 
+      }, async (payload) => {
         if (payload.new.room_id !== activeRoomIdRef.current) return;
         const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
         setMessages(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, { ...payload.new, profiles: p } as Message]));
@@ -58,25 +64,26 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const loadRoomsAndSync = async () => {
     if (!user) return;
     setRoomsLoading(true);
-    const { data: memberships } = await supabase.from('room_members').select('rooms (*)').eq('user_email', user.email);
-    let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
-    let privateConsole = memberRooms.find(r => r.is_private);
+    try {
+      const { data: memberships } = await supabase.from('room_members').select('rooms (*)').eq('user_email', user.email);
+      let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
+      let privateConsole = memberRooms.find(r => r.is_private);
 
-    if (!privateConsole) {
-      const { data: newRoom } = await supabase.from('rooms').insert({
-        name: 'La mia Console', is_private: true, created_by: user.id, ai_provider: 'google-flash'
-      }).select().single();
-      if (newRoom) {
-        await supabase.from('room_members').insert({ room_id: newRoom.id, user_email: user.email, user_id: user.id, role: 'owner' });
-        memberRooms = [newRoom, ...memberRooms];
-        privateConsole = newRoom;
+      if (!privateConsole) {
+        const { data: newRoom } = await supabase.from('rooms').insert({
+          name: 'La mia Console', is_private: true, created_by: user.id, ai_provider: 'google-flash'
+        }).select().single();
+        if (newRoom) {
+          await supabase.from('room_members').insert({ room_id: newRoom.id, user_email: user.email, user_id: user.id, role: 'owner' });
+          memberRooms = [newRoom, ...memberRooms];
+          privateConsole = newRoom;
+        }
       }
-    }
-    setRooms(memberRooms);
-    const savedId = localStorage.getItem('lastActiveRoomId');
-    if (savedId && memberRooms.some(r => r.id === savedId)) onRoomChange(savedId);
-    else if (privateConsole) onRoomChange(privateConsole.id);
-    setRoomsLoading(false);
+      setRooms(memberRooms);
+      const savedId = localStorage.getItem('lastActiveRoomId');
+      if (savedId && memberRooms.some(r => r.id === savedId)) onRoomChange(savedId);
+      else if (privateConsole) onRoomChange(privateConsole.id);
+    } finally { setRoomsLoading(false); }
   };
 
   const loadMessages = async (id: string) => {
@@ -98,7 +105,15 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         const reply = await chatWithAI({ messages: [{content}], provider: activeR.ai_provider, apiKey: activeR.encrypted_api_key || profile?.encrypted_api_key || '' });
         await supabase.from('messages').insert({ user_id: user.id, content: reply, room_id: activeRoomId, is_system: true });
       }
-    } catch (err: any) { toast({ title: "Errore", description: err.message, variant: "destructive" }); } finally { setLoading(false); }
+    } finally { setLoading(false); }
+  };
+
+  const copyJoinCode = () => {
+    const room = rooms.find(r => r.id === activeRoomId);
+    if (room?.join_code) {
+      navigator.clipboard.writeText(room.join_code);
+      toast({ title: "Codice Copiato" });
+    }
   };
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -106,23 +121,26 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const isAdmin = user?.email === 'info@luigicopertino.it' || user?.email === 'unixgigi@gmail.com';
 
   return (
-    <div className="h-full w-full flex relative overflow-hidden">
-      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+    <div className="h-screen w-full flex bg-gray-950 text-white overflow-hidden font-sans relative">
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
-          <div className="p-6 flex items-center justify-between border-b border-gray-800">
-            <h1 className="font-black italic text-xl tracking-widest text-white uppercase">BYOI</h1>
+          <div className="p-6 flex items-center justify-between border-b border-gray-800 bg-gray-900">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-violet-400" />
+              <h1 className="font-black italic text-xl tracking-widest text-white uppercase">BYOI</h1>
+            </div>
             <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setIsSidebarOpen(false)}><X /></Button>
           </div>
-          <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-             <div className="flex items-center justify-between mb-4"><span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</span><Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-6 w-6"><Plus className="h-4 w-4" /></Button></div>
-            {roomsLoading ? <div className="p-4 text-center"><Loader2 className="animate-spin h-4 w-4 inline" /></div> : rooms.map(room => (
-              <button key={room.id} onClick={() => { onRoomChange(room.id); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg' : 'text-gray-400 hover:bg-gray-800'}`}>
+          <nav className="flex-1 overflow-y-auto p-4 space-y-1 custom-scrollbar">
+             <div className="flex items-center justify-between px-3 mb-4"><span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</span><Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-6 w-6"><Plus className="h-4 w-4" /></Button></div>
+            {roomsLoading ? <div className="p-4 text-center"><Loader2 className="animate-spin h-4 w-4 inline text-gray-700" /></div> : rooms.map(room => (
+              <button key={room.id} onClick={() => { onRoomChange(room.id); setIsSidebarOpen(false); localStorage.setItem('lastActiveRoomId', room.id); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all duration-200 ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
                 {room.is_private ? <MessageSquare className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
                 <span className="truncate font-bold">{room.name}</span>
               </button>
             ))}
           </nav>
-          <div className="p-4 border-t border-gray-800 space-y-1">
+          <div className="p-4 border-t border-gray-800 space-y-1 bg-gray-900">
             {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-emerald-400 font-bold hover:bg-emerald-500/10"><ShieldCheck className="h-4 w-4 mr-2" /> Admin</Button>}
             <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-gray-400 hover:text-white"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
             <Button onClick={() => signOut()} variant="ghost" className="w-full justify-start text-red-400 hover:bg-red-500/10"><LogOut className="h-4 w-4 mr-2" /> Logout</Button>
@@ -136,31 +154,38 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <Button variant="ghost" size="icon" className="md:hidden text-gray-400" onClick={() => setIsSidebarOpen(true)}><Menu /></Button>
             <div className="flex flex-col text-left">
               <div className="flex items-center gap-2">
-                <h2 className="font-bold text-sm text-white uppercase italic truncate max-w-[150px]">{activeRoom?.name || 'BYOI'}</h2>
+                <h2 className="font-bold text-sm text-white uppercase italic truncate max-w-[120px] md:max-w-none">{activeRoom?.name || 'Caricamento...'}</h2>
                 {!activeRoom?.is_private && activeRoom?.join_code && (
-                  <button onClick={() => { navigator.clipboard.writeText(activeRoom.join_code!); toast({title: "Copiato"}); }} className="bg-gray-800 text-[10px] px-2 py-0.5 rounded text-violet-400 font-mono border border-gray-700">#{activeRoom.join_code} <Copy className="h-2 w-2" /></button>
+                  <button onClick={copyJoinCode} className="bg-gray-800 text-[9px] px-2 py-0.5 rounded text-violet-400 font-mono border border-gray-700 hover:text-white transition-all active:scale-95">#{activeRoom.join_code} <Copy className="h-2 w-2" /></button>
                 )}
               </div>
-              <span className="text-[8px] text-gray-500 uppercase font-black">{activeRoom?.ai_provider} active</span>
+              <span className="text-[8px] text-gray-500 uppercase font-black tracking-widest">{activeRoom?.ai_provider} active</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600 animate-pulse' : 'bg-violet-600'} text-white rounded-full font-black px-3 h-8 text-[9px] uppercase`}><Sparkles className="mr-1 h-3 w-3" /> {isSelectionMode ? `Confirm (${selectedMessageIds.length})` : 'Summarize'}</Button>
-            <Button onClick={onDevelop} disabled={!activeRoom?.mcp_endpoint} size="sm" className="bg-emerald-600 text-white rounded-full font-black px-3 h-8 text-[9px] uppercase"><Code className="mr-1 h-3 w-3" /> Develop</Button>
+            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600 animate-pulse' : 'bg-violet-600'} text-white rounded-full font-black px-3 h-8 text-[9px] uppercase shadow-lg`}><Sparkles className="mr-1 h-3 w-3" /> <span className="hidden xs:inline">{isSelectionMode ? `Confirm (${selectedMessageIds.length})` : 'Summarize'}</span></Button>
+            <Button onClick={onDevelop} disabled={!activeRoom?.mcp_endpoint} size="sm" className="bg-emerald-600 text-white rounded-full font-black px-3 h-8 text-[9px] uppercase shadow-lg shadow-emerald-900/20"><Code className="mr-1 h-3 w-3" /> <span className="hidden xs:inline">Develop</span></Button>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar pb-24">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 custom-scrollbar pb-24 md:pb-6">
           {messages.map((m) => (
             <ChatMessage key={m.id} message={m} isOwn={m.user_id === user?.id} isSelectionMode={isSelectionMode} isSelected={selectedMessageIds.includes(m.id)} onSelect={(id) => setSelectedMessageIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])} />
           ))}
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="p-4 bg-gray-950 border-t border-gray-800 sticky bottom-0 z-30">
+        <div className="p-4 md:p-6 bg-gray-950 border-t border-gray-800 sticky bottom-0 z-30">
           <form onSubmit={handleSend} className="max-w-4xl mx-auto flex gap-3 items-center">
-            <Textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Messaggio..." disabled={isSelectionMode || !activeRoomId} className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(e); } }} />
-            <Button type="submit" disabled={loading || !newMessage.trim() || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-xl h-12 w-12 flex-shrink-0 shadow-lg transition-transform active:scale-95 flex items-center justify-center p-0"><Send className="h-5 w-5" /></Button>
+            <Textarea 
+              value={newMessage} 
+              onChange={(e) => setNewMessage(e.target.value)} 
+              placeholder="Scrivi un'idea o un comando..." 
+              disabled={isSelectionMode || !activeRoomId} 
+              className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] h-12 max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" 
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(e); } }} 
+            />
+            <Button type="submit" disabled={loading || !newMessage.trim() || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-xl h-12 w-12 flex-shrink-0 shadow-lg shadow-violet-900/30 transition-transform active:scale-95 flex items-center justify-center p-0"><Send className="h-5 w-5" /></Button>
           </form>
         </div>
       </main>
