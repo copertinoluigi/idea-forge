@@ -7,11 +7,9 @@ import { ChatMessage } from '@/components/ChatMessage';
 import { useToast } from '@/hooks/use-toast';
 import { AddRoomModal } from '@/components/AddRoomModal';
 import { chatWithAI } from '@/lib/ai-service';
-import { format, isToday, isYesterday } from 'date-fns';
-import { it } from 'date-fns/locale';
 import { 
-  Send, Sparkles, Code, Settings, LogOut, Plus, Hash, 
-  MessageSquare, ShieldCheck, Loader2, Menu, X, Paperclip, Smile
+  Send, Sparkles, Settings, LogOut, Hash, 
+  ShieldCheck, Loader2, Menu, X, Paperclip, Smile, Code
 } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
@@ -34,7 +32,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [roomsLoading, setRoomsLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
@@ -72,14 +69,15 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   const loadRoomsAndSync = async () => {
     if (!user) return;
-    setRoomsLoading(true);
     try {
       const { data: memberships } = await supabase.from('room_members').select('rooms (*)').eq('user_email', user.email);
       let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
       setRooms(memberRooms);
       const savedId = profile?.last_room_id || localStorage.getItem('lastActiveRoomId');
       if (savedId && memberRooms.some(r => r.id === savedId)) onRoomChange(savedId);
-    } finally { setRoomsLoading(false); }
+    } catch (err) {
+      console.error("Error loading rooms:", err);
+    }
   };
 
   const loadMessages = async (id: string) => {
@@ -152,7 +150,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </div>
           <div className="flex-1 overflow-y-auto px-3 py-4 custom-scrollbar">
             {rooms.map(room => (
-              <button key={room.id} onClick={() => handleRoomSwitch(room.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all ${activeRoomId === room.id ? 'bg-violet-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>
+              <button key={room.id} onClick={() => handleRoomSwitch(room.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all mb-1 ${activeRoomId === room.id ? 'bg-violet-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>
                 <Hash className="h-4 w-4" /> <span className="truncate font-bold tracking-tight">{room.name}</span>
               </button>
             ))}
@@ -173,11 +171,14 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <Button variant="ghost" size="icon" className="md:hidden text-gray-400" onClick={() => setIsSidebarOpen(true)}><Menu /></Button>
             <h2 className="font-bold text-sm text-white uppercase italic truncate max-w-[150px]">{activeRoom?.name || 'BYOI'}</h2>
           </div>
-          <Button onClick={() => isSelectionMode ? (onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))), setIsSelectionMode(false)) : setIsSelectionMode(true)} size="sm" className="bg-violet-600 rounded-full font-black px-3 h-8 text-[9px] uppercase"><Sparkles className="mr-1 h-3 w-3" /> {isSelectionMode ? 'Confirm' : 'Summarize'}</Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => isSelectionMode ? (onSummarize(messages.filter(m => selectedMessageIds.includes(m.id))), setIsSelectionMode(false)) : setIsSelectionMode(true)} size="sm" className="bg-violet-600 rounded-full font-black px-3 h-8 text-[9px] uppercase"><Sparkles className="mr-1 h-3 w-3" /> {isSelectionMode ? 'Confirm' : 'Summarize'}</Button>
+            <Button onClick={onDevelop} size="sm" className="bg-emerald-600 text-white rounded-full font-black px-3 h-8 text-[9px] uppercase"><Code className="mr-1 h-3 w-3" /> Develop</Button>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar">
-          {messages.map((m, index) => (
+          {messages.map((m) => (
             <div key={m.id} className="w-full">
               <ChatMessage message={m} isOwn={m.user_id === user?.id} isSelectionMode={isSelectionMode} isSelected={selectedMessageIds.includes(m.id)} onSelect={(id) => setSelectedMessageIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])} />
             </div>
@@ -199,7 +200,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               <Button type="button" variant="ghost" size="icon" disabled={isUploading} onClick={() => fileInputRef.current?.click()} className="text-gray-400 hover:text-white">
                 {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" />}
               </Button>
-              <Button type="button" variant="ghost" size="icon" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="text-gray-400 hover:text-white"><Smile className="h-5 w-5" /></Button>
+              <Button type="button" variant="ghost" size="icon" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`text-gray-400 hover:text-white ${showEmojiPicker ? 'text-violet-400' : ''}`}><Smile className="h-5 w-5" /></Button>
             </div>
             <Textarea 
               value={newMessage} 
