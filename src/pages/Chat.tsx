@@ -7,9 +7,11 @@ import { ChatMessage } from '@/components/ChatMessage';
 import { useToast } from '@/hooks/use-toast';
 import { AddRoomModal } from '@/components/AddRoomModal';
 import { chatWithAI } from '@/lib/ai-service';
+import { format, isToday, isYesterday } from 'date-fns';
+import { it } from 'date-fns/locale';
 import { 
   Send, Sparkles, Settings, LogOut, Hash, 
-  ShieldCheck, Loader2, Menu, X, Paperclip, Smile, Code
+  ShieldCheck, Loader2, Menu, X, Paperclip, Smile, Code, Plus, MessageSquare
 } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
@@ -32,7 +34,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [roomsLoading, setRoomsLoading] = useState(true); // AGGIUNTO: Stato mancante
+  const [roomsLoading, setRoomsLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
@@ -72,7 +74,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     if (!user) return;
     setRoomsLoading(true);
     try {
-      // 1. Carica le stanze di cui l'utente è membro
       const { data: memberships, error: memError } = await supabase
         .from('room_members')
         .select('rooms (*)')
@@ -83,9 +84,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
       let privateConsole = memberRooms.find(r => r.is_private);
 
-      // 2. Se è un nuovo utente e non ha una console, creala
       if (!privateConsole) {
-        console.log("Nuovo utente rilevato: creazione console privata...");
         const { data: newRoom, error: roomError } = await supabase
           .from('rooms')
           .insert({
@@ -116,7 +115,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       if (savedId && memberRooms.some(r => r.id === savedId)) onRoomChange(savedId);
       else if (privateConsole) onRoomChange(privateConsole.id);
     } catch (err) {
-      console.error("Errore sincronizzazione stanze:", err);
+      console.error("Sync error:", err);
     } finally {
       setRoomsLoading(false);
     }
@@ -190,16 +189,20 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <Button variant="ghost" size="icon" className="md:hidden text-gray-500" onClick={() => setIsSidebarOpen(false)}><X /></Button>
           </div>
           <div className="flex-1 overflow-y-auto px-3 py-4 custom-scrollbar">
+            <div className="flex items-center justify-between px-3 mb-4">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</span>
+              <Button onClick={() => setIsAddRoomOpen(true)} variant="ghost" size="icon" className="h-6 w-6 text-gray-500 hover:text-violet-400 hover:bg-gray-800">
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
             {roomsLoading ? (
                <div className="flex justify-center p-4"><Loader2 className="animate-spin h-6 w-6 text-gray-700" /></div>
             ) : rooms.map(room => (
               <button key={room.id} onClick={() => handleRoomSwitch(room.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all mb-1 ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40' : 'text-gray-400 hover:bg-gray-800'}`}>
-                <Hash className="h-4 w-4" /> <span className="truncate font-bold tracking-tight">{room.name}</span>
+                {room.is_private ? <MessageSquare className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
+                <span className="truncate font-bold tracking-tight">{room.name}</span>
               </button>
             ))}
-            {!roomsLoading && rooms.length === 0 && (
-              <p className="text-[10px] text-gray-600 text-center px-4 mt-4 uppercase font-bold tracking-widest">Nessuna stanza disponibile</p>
-            )}
           </div>
           <div className="p-4 border-t border-gray-800 space-y-1 bg-gray-950/50">
             {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold"><ShieldCheck className="h-4 w-4 mr-2" /> Admin</Button>}
@@ -224,11 +227,30 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar">
-          {messages.map((m) => (
-            <div key={m.id} className="w-full">
-              <ChatMessage message={m} isOwn={m.user_id === user?.id} isSelectionMode={isSelectionMode} isSelected={selectedMessageIds.includes(m.id)} onSelect={(id) => setSelectedMessageIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])} />
-            </div>
-          ))}
+          {messages.map((m, index) => {
+            const currentDate = new Date(m.created_at);
+            const previousDate = index > 0 ? new Date(messages[index - 1].created_at) : null;
+            const showDateSeparator = !previousDate || format(currentDate, 'yyyy-MM-dd') !== format(previousDate, 'yyyy-MM-dd');
+
+            let dateLabel = format(currentDate, 'd MMMM yyyy', { locale: it });
+            if (isToday(currentDate)) dateLabel = 'Oggi';
+            else if (isYesterday(currentDate)) dateLabel = 'Ieri';
+
+            return (
+              <div key={m.id} className="w-full">
+                {showDateSeparator && (
+                  <div className="flex items-center justify-center my-8 gap-4 px-4">
+                    <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-gray-800 to-gray-800" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-500 bg-gray-950 px-3 whitespace-nowrap">
+                      {dateLabel}
+                    </span>
+                    <div className="h-[1px] flex-1 bg-gradient-to-l from-transparent via-gray-800 to-gray-800" />
+                  </div>
+                )}
+                <ChatMessage message={m} isOwn={m.user_id === user?.id} isSelectionMode={isSelectionMode} isSelected={selectedMessageIds.includes(m.id)} onSelect={(id) => setSelectedMessageIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])} />
+              </div>
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
 
