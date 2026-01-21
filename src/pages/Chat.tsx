@@ -48,22 +48,40 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomIdRef = useRef(activeRoomId);
 
-  // FIX iOS: Gestione dinamica altezza viewport per evitare spazio bianco tastiera
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.visualViewport) {
-        const height = window.visualViewport.height;
-        document.documentElement.style.setProperty('--vh', `${height}px`);
+  /useEffect(() => {
+  const handleViewportChange = () => {
+    if (window.visualViewport) {
+      const vv = window.visualViewport;
+      // Impostiamo l'altezza reale visibile
+      document.documentElement.style.setProperty('--vh', `${vv.height}px`);
+      
+      // FIX CRUCIALE: Se la tastiera è aperta (height ridotta), 
+      // forziamo lo scroll a 0 per impedire a iOS di traslare la pagina
+      if (vv.height < window.innerHeight) {
+        window.scrollTo(0, 0);
       }
-    };
-    window.visualViewport?.addEventListener('resize', handleResize);
-    window.visualViewport?.addEventListener('scroll', handleResize);
-    handleResize();
-    return () => {
-      window.visualViewport?.removeEventListener('resize', handleResize);
-      window.visualViewport?.removeEventListener('scroll', handleResize);
-    };
-  }, []);
+    }
+  };
+
+  window.visualViewport?.addEventListener('resize', handleViewportChange);
+  window.visualViewport?.addEventListener('scroll', handleViewportChange);
+  handleViewportChange();
+
+  return () => {
+    window.visualViewport?.removeEventListener('resize', handleViewportChange);
+    window.visualViewport?.removeEventListener('scroll', handleViewportChange);
+  };
+}, []);
+
+// Funzione aggiuntiva per forzare la posizione al focus
+const handleInputFocus = () => {
+  // Piccolo delay per aspettare che la tastiera inizi a salire
+  setTimeout(() => {
+    window.scrollTo(0, 0);
+    document.body.scrollTop = 0;
+    scrollToBottom();
+  }, 100);
+};
 
   useEffect(() => { activeRoomIdRef.current = activeRoomId; }, [activeRoomId]);
   useEffect(() => { if (user) loadRoomsAndSync(); }, [user]);
