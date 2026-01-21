@@ -46,7 +46,7 @@ export function Login({ onToggleMode }: { onToggleMode: () => void }) {
               <Sparkles className="h-8 w-8 text-violet-400" />
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold text-white">IdeaForge</CardTitle>
+          <CardTitle className="text-2xl font-bold text-white">BYOI</CardTitle>
           <CardDescription className="text-gray-400">
             Sign in to your collaborative AI workspace
           </CardDescription>
