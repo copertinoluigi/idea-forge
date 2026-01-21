@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'; // Aggiunto useEffect
+import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { Login } from '@/pages/Login';
 import { Register } from '@/pages/Register';
@@ -26,27 +26,29 @@ function AppContent() {
   const { toast } = useToast();
 
   // ═══════════════════════════════════════════════════════════════════
-  // 📱 FIX GLOBALE TASTIERA & VIEWPORT (iOS PWA)
+  // 📱 FIX ANTI-PANNING iOS (Forza l'header a restare in alto)
   // ═══════════════════════════════════════════════════════════════════
   useEffect(() => {
-    const updateHeight = () => {
+    const handleViewportChange = () => {
       if (window.visualViewport) {
-        // Imposta l'altezza reale visibile escludendo la tastiera
-        document.documentElement.style.setProperty('--vh', `${window.visualViewport.height}px`);
-        // Impedisce spostamenti indesiderati di Safari
-        if (window.visualViewport.height < window.innerHeight) {
+        const vv = window.visualViewport;
+        // Imposta l'altezza reale visibile
+        document.documentElement.style.setProperty('--vh', `${vv.height}px`);
+        
+        // Se Safari prova a spostare la pagina (panning), resettiamo a forza
+        if (window.scrollY !== 0) {
           window.scrollTo(0, 0);
         }
       }
     };
 
-    window.visualViewport?.addEventListener('resize', updateHeight);
-    window.visualViewport?.addEventListener('scroll', updateHeight);
-    updateHeight();
+    window.visualViewport?.addEventListener('resize', handleViewportChange);
+    window.visualViewport?.addEventListener('scroll', handleViewportChange);
+    handleViewportChange();
 
     return () => {
-      window.visualViewport?.removeEventListener('resize', updateHeight);
-      window.visualViewport?.removeEventListener('scroll', updateHeight);
+      window.visualViewport?.removeEventListener('resize', handleViewportChange);
+      window.visualViewport?.removeEventListener('scroll', handleViewportChange);
     };
   }, []);
 
@@ -76,30 +78,21 @@ function AppContent() {
     } finally { setIsSummarizing(false); setPendingMessages([]); }
   };
 
-  // 🔐 STEP 1: AUTH LOADING
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-950">
         <div className="text-center space-y-4">
           <Loader2 className="animate-spin text-violet-500 h-10 w-10 mx-auto" />
-          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em]">
-            BYOI Auth Check...
-          </p>
+          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em]">BYOI Auth Check...</p>
         </div>
       </div>
     );
   }
 
-  // 🚫 STEP 2: NO USER
   if (!user) {
-    return authMode === 'login' ? (
-      <Login onToggleMode={() => setAuthMode('register')} />
-    ) : (
-      <Register onToggleMode={() => setAuthMode('login')} />
-    );
+    return authMode === 'login' ? <Login onToggleMode={() => setAuthMode('register')} /> : <Register onToggleMode={() => setAuthMode('login')} />;
   }
 
-  // ⏳ STEP 3 & 4: PROFILO LOADING / ERRORI
   if (!profile && profileLoading) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-950">
@@ -111,19 +104,6 @@ function AppContent() {
     );
   }
 
-  if (!profile && !profileLoading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-gray-950">
-        <div className="text-center space-y-6 max-w-md px-6">
-          <div className="text-6xl">⚠️</div>
-          <h1 className="text-xl font-bold text-white">Errore Sincronizzazione</h1>
-          <button onClick={() => window.location.reload()} className="px-6 py-3 bg-violet-600 text-white rounded-lg text-sm">🔄 Riprova</button>
-        </div>
-      </div>
-    );
-  }
-
-  // 🎯 STEP 5, 6, 7: VISTE AUTENTICATE (Avvolte nell'app-shell per Safe Area iOS)
   return (
     <div className="app-shell">
       {profile && profile.has_completed_setup === false ? (
@@ -149,11 +129,7 @@ function AppContent() {
             onGenerate={handleSummarize} 
             loading={isSummarizing} 
           />
-          <DevelopModal 
-            isOpen={developModalOpen} 
-            onClose={() => setDevelopModalOpen(false)} 
-            onDevelop={async () => {}} 
-          />
+          <DevelopModal isOpen={developModalOpen} onClose={() => setDevelopModalOpen(false)} onDevelop={async () => {}} />
           <Toaster />
         </>
       )}
