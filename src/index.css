@@ -22,23 +22,30 @@
 }
 
 /* FIX PER iOS PWA: Impedisce lo scroll del body e gestisce l'altezza della tastiera */
-body {
-  margin: 0;
-  min-width: 320px;
-  width: 100%;
+/* Sostituisci la parte iniziale del tuo index.css con questa */
+html, body {
   height: 100%;
-  position: fixed; /* Fondamentale per bloccare il rimbalzo su iOS */
-  overflow: hidden;
-  @apply bg-background text-foreground;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* Impedisce a iOS di "scollare" la pagina verso l'alto */
+  position: fixed; /* Blocca la posizione del corpo */
 }
 
 #root {
   height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Classe dinamica per l'altezza visuale (gestita via JS in Chat.tsx) */
+/* Questa classe deve essere applicata al contenitore principale in Chat.tsx */
 .h-screen-dynamic {
-  height: var(--vh, 100vh);
+  height: var(--vh, 100dvh);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 @layer base {
