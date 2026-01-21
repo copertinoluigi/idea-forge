@@ -51,27 +51,32 @@ function AppContent() {
     } finally { setIsSummarizing(false); setPendingMessages([]); }
   };
 
-  // 1. Loader iniziale (Solo per Auth)
-  if (loading) {
+  // 1. Se sta caricando l'auth O se l'utente c'è ma il profilo sta ancora arrivando: LOADER
+  if (loading || (user && !profile)) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-950">
         <div className="text-center space-y-4">
           <Loader2 className="animate-spin text-violet-500 h-10 w-10 mx-auto" />
-          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em] animate-pulse">BYOI Sincronizzazione...</p>
+          <p className="text-gray-500 text-[10px] font-black uppercase tracking-[0.3em]">BYOI Sincronizzazione...</p>
         </div>
       </div>
     );
   }
 
-  // 2. Se non loggato -> Auth
+  // 2. Se non c'è l'utente dopo il caricamento: LOGIN
   if (!user) {
-    return authMode === 'login' ? <Login onToggleMode={() => setAuthMode('register')} /> : <Register onToggleMode={() => setAuthMode('login')} />;
+    return authMode === 'login' ? (
+      <Login onToggleMode={() => setAuthMode('register')} />
+    ) : (
+      <Register onToggleMode={() => setAuthMode('login')} />
+    );
   }
 
-  // 3. Se loggato ma setup incompleto (Aspetta che profile sia caricato per decidere)
+  // 3. Se il profilo è arrivato ma il setup non è fatto: SETUP
   if (profile && profile.has_completed_setup === false) {
     return <Setup />;
   }
+
 
   // 4. Router Viste
   if (currentView === 'settings') return <Settings onBack={() => setCurrentView('chat')} />;
