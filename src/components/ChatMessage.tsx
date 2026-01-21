@@ -1,5 +1,4 @@
-import { format, isToday, isYesterday } from 'date-fns';
-import { it } from 'date-fns/locale';
+import { format } from 'date-fns';
 import { CheckCircle2, Bot, Copy, Terminal, Check } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -27,9 +26,8 @@ export function ChatMessage({ message, isOwn, isSelectionMode, isSelected, onSel
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // --- RENDERING DEI BLOCCHI DI CODICE ---
   const components = {
-    code({ node, inline, className, children, ...props }: any) {
+    code({ inline, className, children, ...props }: any) {
       const match = /language-(\w+)/.exec(className || '');
       const codeContent = String(children).replace(/\n$/, '');
 
@@ -37,6 +35,7 @@ export function ChatMessage({ message, isOwn, isSelectionMode, isSelected, onSel
         <div className="relative my-4 group/code w-full">
           <div className="absolute right-3 top-3 opacity-0 group-hover/code:opacity-100 transition-opacity z-10">
             <button
+              type="button"
               onClick={() => copyToClipboard(codeContent)}
               className="p-1.5 rounded-md bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
             >
@@ -66,44 +65,39 @@ export function ChatMessage({ message, isOwn, isSelectionMode, isSelected, onSel
   if (message.is_system) {
     return (
       <div 
-        className={`flex w-full justify-start mb-8 transition-all ${isSelectionMode ? 'cursor-pointer hover:scale-[1.01]' : ''}`}
+        className={`flex w-full justify-start mb-6 transition-all ${isSelectionMode ? 'cursor-pointer hover:opacity-80' : ''}`}
         onClick={() => isSelectionMode && onSelect?.(message.id)}
       >
-        <div className="flex items-start gap-3 max-w-[98%] md:max-w-[85%] w-full">
+        <div className="flex items-start gap-3 max-w-[95%] md:max-w-[85%]">
           {isSelectionMode && (
-            <div className={`mt-4 flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-              isSelected ? 'bg-violet-500 border-violet-500 scale-110 shadow-lg shadow-violet-500/20' : 'border-gray-700'
+            <div className={`mt-3 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+              isSelected ? 'bg-violet-500 border-violet-500' : 'border-gray-700'
             }`}>
-              {isSelected && <CheckCircle2 className="h-4 w-4 text-white" />}
+              {isSelected && <CheckCircle2 className="h-3 w-3 text-white" />}
             </div>
           )}
           
-          <div className="flex flex-col items-start w-full">
-            <div className="flex items-center gap-2 mb-2 px-1">
-              <div className="bg-violet-600/20 p-1.5 rounded-lg border border-violet-500/20">
-                <Bot className="h-4 w-4 text-violet-400" />
+          <div className="flex flex-col items-start w-full text-left">
+            <div className="flex items-center gap-2 mb-1.5 px-1">
+              <div className="bg-violet-500/20 p-1 rounded">
+                <Bot className="h-3 w-3 text-violet-400" />
               </div>
-              <span className="text-[10px] text-violet-400 font-black uppercase tracking-widest antialiased">
-                BYOI Intelligence
-              </span>
+              <span className="text-[10px] text-violet-400 font-black uppercase tracking-widest">BYOI Intelligence</span>
             </div>
 
-            <div className="rounded-2xl px-5 py-4 bg-gray-900/40 border border-gray-800/60 text-gray-200 shadow-2xl backdrop-blur-sm w-full">
+            <div className="rounded-2xl px-4 py-3 bg-gray-900/50 border border-gray-800 text-gray-200 shadow-sm w-full overflow-hidden">
               <div className="prose prose-invert prose-sm max-w-none 
-                prose-p:leading-relaxed prose-p:text-gray-300 prose-p:mb-4 last:prose-p:mb-0
-                prose-headings:text-white prose-headings:font-black prose-headings:tracking-tight
-                prose-ul:list-disc prose-ul:pl-5
-                prose-strong:text-violet-400 prose-strong:font-bold">
+                prose-p:leading-relaxed prose-p:mb-3 last:prose-p:mb-0
+                prose-headings:text-white prose-headings:font-bold prose-headings:mb-2
+                prose-ul:list-disc prose-ul:pl-4 prose-li:mb-1
+                prose-table:border prose-table:border-gray-700 prose-th:bg-gray-800 prose-th:p-2 prose-td:p-2 prose-td:border-t prose-td:border-gray-800">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
                   {message.content}
                 </ReactMarkdown>
               </div>
-              <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-800/50">
-                <span className="text-[9px] text-gray-600 font-mono uppercase tracking-widest font-bold">
-                  {format(new Date(message.created_at), 'HH:mm')}
-                </span>
-                <div className="h-1 w-1 rounded-full bg-violet-500/30" />
-              </div>
+              <p className="text-[9px] mt-3 opacity-30 font-mono">
+                {format(new Date(message.created_at), 'HH:mm')}
+              </p>
             </div>
           </div>
         </div>
@@ -113,33 +107,33 @@ export function ChatMessage({ message, isOwn, isSelectionMode, isSelected, onSel
 
   return (
     <div 
-      className={`flex w-full ${isOwn ? 'justify-end' : 'justify-start'} mb-4 transition-all ${isSelectionMode ? 'cursor-pointer hover:scale-[1.01]' : ''}`}
+      className={`flex w-full ${isOwn ? 'justify-end' : 'justify-start'} mb-4 transition-all ${isSelectionMode ? 'cursor-pointer' : ''}`}
       onClick={() => isSelectionMode && onSelect?.(message.id)}
     >
-      <div className={`flex items-start gap-3 max-w-[92%] md:max-w-[80%] ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
+      <div className={`flex items-start gap-2 max-w-[92%] md:max-w-[80%] ${isOwn ? 'flex-row-reverse text-right' : 'flex-row text-left'}`}>
         {isSelectionMode && (
-          <div className={`mt-3 flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-            isSelected ? 'bg-violet-500 border-violet-500 scale-110 shadow-lg shadow-violet-500/20' : 'border-gray-700'
+          <div className={`mt-3 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+            isSelected ? 'bg-violet-500 border-violet-500' : 'border-gray-700'
           }`}>
-            {isSelected && <CheckCircle2 className="h-4 w-4 text-white" />}
+            {isSelected && <CheckCircle2 className="h-3 w-3 text-white" />}
           </div>
         )}
         
         <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
           {!isOwn && (
-            <span className="text-[10px] text-violet-400 font-black mb-1.5 px-2 uppercase tracking-widest antialiased">
-              {message.profiles?.display_name || 'Collaboratore'}
+            <span className="text-[10px] text-violet-400 font-black mb-1 px-1 uppercase tracking-tighter">
+              {message.profiles?.display_name || 'Anon'}
             </span>
           )}
-          <div className={`rounded-2xl px-4 py-3 shadow-xl ${
+          <div className={`rounded-2xl px-4 py-2.5 shadow-md ${
             isOwn 
-              ? 'bg-violet-600 text-white rounded-br-none shadow-violet-900/20' 
-              : 'bg-gray-800/80 text-gray-100 rounded-bl-none border border-gray-700 shadow-black/20 backdrop-blur-sm'
+              ? 'bg-violet-600 text-white rounded-br-none' 
+              : 'bg-gray-800 text-gray-100 rounded-bl-none border border-gray-700'
           }`}>
-            <p className="text-[15px] md:text-sm whitespace-pre-wrap break-words leading-relaxed font-medium antialiased">
+            <p className="text-[14px] md:text-sm whitespace-pre-wrap break-words leading-snug font-medium">
               {message.content}
             </p>
-            <p className={`text-[9px] mt-1.5 font-bold opacity-40 ${isOwn ? 'text-violet-100' : 'text-gray-500'}`}>
+            <p className={`text-[9px] mt-1 opacity-50 ${isOwn ? 'text-violet-100' : 'text-gray-500'}`}>
               {format(new Date(message.created_at), 'HH:mm')}
             </p>
           </div>
