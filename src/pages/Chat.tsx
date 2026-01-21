@@ -282,7 +282,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         </div>
 
         {/* INPUT AREA DEFINITIVA */}
-        <div className="p-4 md:p-6 bg-gray-950 border-t border-gray-800 sticky bottom-0 z-30">
+        <div className="p-4 md:p-6 bg-gray-950 border-t border-gray-800 sticky bottom-0 z-30 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <form onSubmit={handleSend} className="max-w-4xl mx-auto flex gap-2 items-center relative">
             
             {showEmojiPicker && (
