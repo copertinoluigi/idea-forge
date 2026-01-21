@@ -68,17 +68,76 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   }, [activeRoomId]);
 
   const loadRoomsAndSync = async () => {
-    if (!user) return;
-    try {
-      const { data: memberships } = await supabase.from('room_members').select('rooms (*)').eq('user_email', user.email);
-      let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
-      setRooms(memberRooms);
-      const savedId = profile?.last_room_id || localStorage.getItem('lastActiveRoomId');
-      if (savedId && memberRooms.some(r => r.id === savedId)) onRoomChange(savedId);
-    } catch (err) {
-      console.error("Error loading rooms:", err);
+  if (!user) return;
+  setRoomsLoading(true);
+  try {
+    // 1. Cerchiamo le stanze di cui l'utente è membro usando l'user_id (più sicuro dell'email)
+    const { data: memberships, error: memError } = await supabase
+      .from('room_members')
+      .select('rooms (*)')
+      .eq('user_id', user.id);
+
+    if (memError) throw memError;
+
+    let memberRooms = (memberships?.map(m => m.rooms).filter(Boolean) as unknown as Room[]) || [];
+    let privateConsole = memberRooms.find(r => r.is_private);
+
+    // 2. Se non esiste una console privata, proviamo a crearla
+    if (!privateConsole) {
+      console.log("Nessuna console privata trovata, creazione in corso...");
+      
+      const { data: newRoom, error: roomError } = await supabase
+        .from('rooms')
+        .insert({
+          name: 'La mia Console',
+          is_private: true,
+          created_by: user.id,
+          ai_provider: 'google-flash'
+        })
+        .select()
+        .single();
+
+      if (roomError) {
+        console.error("Errore creazione room:", roomError);
+        throw roomError;
+      }
+
+      if (newRoom) {
+        // Creiamo la membership per la nuova stanza
+        const { error: joinError } = await supabase
+          .from('room_members')
+          .insert({ 
+            room_id: newRoom.id, 
+            user_email: user.email, 
+            user_id: user.id, 
+            role: 'owner' 
+          });
+
+        if (joinError) {
+          console.error("Errore creazione membership:", joinError);
+          throw joinError;
+        }
+
+        memberRooms = [newRoom, ...memberRooms];
+        privateConsole = newRoom;
+      }
     }
-  };
+
+    setRooms(memberRooms);
+    
+    // Imposta la stanza attiva
+    const savedId = profile?.last_room_id || localStorage.getItem('lastActiveRoomId');
+    if (savedId && memberRooms.some(r => r.id === savedId)) {
+      onRoomChange(savedId);
+    } else if (privateConsole) {
+      onRoomChange(privateConsole.id);
+    }
+  } catch (error) {
+    console.error("loadRoomsAndSync Critical Error:", error);
+  } finally {
+    setRoomsLoading(false);
+  }
+};
 
   const loadMessages = async (id: string) => {
     const { data } = await supabase.from('messages').select('*, profiles(display_name)').eq('room_id', id).order('created_at', { ascending: true });
