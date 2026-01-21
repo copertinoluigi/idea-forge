@@ -22,46 +22,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadProfile = async (userId: string, email: string) => {
+  const syncProfile = async (userId: string, email: string) => {
     try {
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
       if (error) throw error;
+      
       if (data) {
         setProfile(data);
       } else {
-        // Auto-creazione di emergenza
-        const { data: newP } = await supabase.from('profiles').insert({
+        // Auto-creazione se il profilo manca
+        const { data: newProfile, error: createError } = await supabase.from('profiles').insert({
           id: userId, email, display_name: email.split('@')[0], has_completed_setup: false
         }).select().single();
-        if (newP) setProfile(newP);
+        if (!createError) setProfile(newProfile);
       }
     } catch (e) {
-      console.error("AuthContext: Profile load failed", e);
+      console.error("BYOI Auth: Sync Error", e);
     }
   };
 
   useEffect(() => {
     let mounted = true;
 
-    async function getInitialSession() {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (mounted && session?.user) {
+    // Inizializzazione Sessione (NON BLOCCANTE)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (mounted) {
+        if (session?.user) {
           setUser(session.user);
-          await loadProfile(session.user.id, session.user.email!);
+          syncProfile(session.user.id, session.user.email!);
         }
-      } finally {
-        if (mounted) setLoading(false); // SBLOCCO GARANTITO
+        setLoading(false); // SBLOCCO IMMEDIATO
       }
-    }
+    });
 
-    getInitialSession();
-
+    // Ascolto cambiamenti
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (mounted) {
         if (session?.user) {
           setUser(session.user);
-          await loadProfile(session.user.id, session.user.email!);
+          await syncProfile(session.user.id, session.user.email!);
         } else {
           setUser(null);
           setProfile(null);
@@ -74,17 +73,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshProfile = async () => {
-    if (user) await loadProfile(user.id, user.email!);
+    if (user) await syncProfile(user.id, user.email!);
+  };
+
+  const signIn = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  };
+
+  const signUp = async (email: string, password: string, displayName: string, inviteCode: string) => {
+    const { data: invite } = await supabase.from('invites').select('*').eq('code', inviteCode).eq('is_used', false).maybeSingle();
+    if (!invite) throw new Error('Invito non valido o già usato.');
+    const { data: auth, error: aErr } = await supabase.auth.signUp({ email, password });
+    if (aErr || !auth.user) throw aErr || new Error('Signup fallito');
+    await supabase.from('profiles').insert({ id: auth.user.id, email, display_name: displayName });
+    await supabase.from('invites').update({ is_used: true, used_by: auth.user.id, used_at: new Date().toISOString() }).eq('id', invite.id);
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    localStorage.clear();
+    setUser(null);
+    setProfile(null);
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, profile, loading, 
-      signIn: async (e, p) => { await supabase.auth.signInWithPassword({email: e, password: p}) },
-      signUp: async () => {}, // Logica gestita in Register.tsx
-      signOut: async () => { await supabase.auth.signOut(); localStorage.clear(); },
-      refreshProfile 
-    }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
