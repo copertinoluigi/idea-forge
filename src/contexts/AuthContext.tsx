@@ -25,55 +25,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileLoading, setProfileLoading] = useState(false);
 
   const loadProfile = async (userId: string, email: string) => {
+    if (profileLoading) return; // Evita chiamate doppie
+    
     setProfileLoading(true);
-    console.log('🔄 BYOI: Profile fetch started...');
+    console.log('🔄 BYOI: Richiesta profilo avviata per:', userId);
     
     try {
-      // Timeout di 2 secondi per la query al DB
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      // Timeout forzato di 3 secondi
+      const { data, error } = await Promise.race([
+        supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout DB')), 3000))
+      ]) as any;
 
-      const { data, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .abortSignal(controller.signal)
-        .maybeSingle();
-
-      clearTimeout(timeoutId);
-
-      if (profileError) {
-        console.error('❌ BYOI: Errore query profilo:', profileError);
-        throw profileError;
-      }
+      if (error) throw error;
 
       if (data) {
-        console.log('✅ BYOI: Profile caricato correttamente dal DB', data);
+        console.log('✅ BYOI: Profilo ricevuto:', data.display_name);
         setProfile(data);
       } else {
-        throw new Error('Profile non trovato nel database');
+        console.log('🎭 BYOI: Profilo mancante, generazione Mock...');
+        setProfile({
+          id: userId,
+          email: email,
+          display_name: email.split('@')[0],
+          has_completed_setup: true, // Bypass per debug
+          encrypted_api_key: null,
+          ai_provider: 'google-flash',
+          mcp_endpoint: null,
+          last_room_id: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
       }
     } catch (err) {
-      console.warn('⚠️ BYOI: Errore fetch o timeout. ATTIVAZIONE PROFILO MOCK DI EMERGENZA.', err);
-      
-      // MOCK PROFILE: Allineato esattamente ai tuoi database.types.ts
-      const mockProfile: Profile = {
-        id: userId,
-        email: email,
-        display_name: email.split('@')[0],
-        has_completed_setup: true, // Bypassiamo il setup per testare la chat
-        encrypted_api_key: null,
-        ai_provider: 'google-flash',
-        mcp_endpoint: null,
-        last_room_id: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      
-      console.log('🎭 BYOI: Profilo MOCK pronto:', mockProfile);
-      setProfile(mockProfile);
+      console.error('⚠️ BYOI: Errore o Timeout Profilo:', err);
     } finally {
       setProfileLoading(false);
+      // FONDAMENTALE: Sblocchiamo l'app in ogni caso
+      setLoading(false); 
+      console.log('🏁 BYOI: Stato Loading sbloccato');
     }
   };
 
@@ -81,51 +71,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let mounted = true;
 
     async function initAuth() {
-      console.log('🚀 BYOI: Init auth started');
+      console.log('🚀 BYOI: Inizializzazione sessione...');
+      const { data: { session } } = await supabase.auth.getSession();
       
-      try {
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) {
-          console.error('❌ BYOI: Session error:', sessionError);
-          throw sessionError;
-        }
-        
-        if (!mounted) return;
+      if (!mounted) return;
 
-        if (session?.user) {
-          console.log('👤 BYOI: Utente loggato:', session.user.email);
-          setUser(session.user);
-          await loadProfile(session.user.id, session.user.email!);
-        } else {
-          console.log('🚫 BYOI: Nessuna sessione attiva');
-        }
-      } catch (e) {
-        console.error('💥 BYOI: Errore critico inizializzazione:', e);
-      } finally {
-        if (mounted) {
-          console.log('🏁 BYOI: Caricamento terminato, loading = false');
-          setLoading(false);
-        }
+      if (session?.user) {
+        console.log('👤 BYOI: Utente trovato:', session.user.email);
+        setUser(session.user);
+        // Lanciamo loadProfile ma NON mettiamo await, così non blocchiamo l'init
+        loadProfile(session.user.id, session.user.email!);
+        
+        // Sblocchiamo la UI dopo un breve istante a prescindere dal profilo
+        setTimeout(() => { if (mounted) setLoading(false); }, 500);
+      } else {
+        console.log('🚫 BYOI: Nessuna sessione');
+        setLoading(false);
       }
     }
 
     initAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('🔔 BYOI: Evento Auth rilevato:', event);
-      
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('🔔 BYOI: Evento Auth:', event);
       if (!mounted) return;
 
       if (session?.user) {
         setUser(session.user);
-        await loadProfile(session.user.id, session.user.email!);
+        loadProfile(session.user.id, session.user.email!);
       } else {
         setUser(null);
         setProfile(null);
+        setLoading(false);
       }
-      
-      setLoading(false);
     });
 
     return () => {
@@ -141,20 +119,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string, displayName: string, inviteCode: string) => {
     const { data: invite } = await supabase.from('invites').select('*').eq('code', inviteCode).eq('is_used', false).maybeSingle();
-    if (!invite) throw new Error('Codice invito non valido');
+    if (!invite) throw new Error('Invite code non valido');
 
-    const { data: authData, error: authErr } = await supabase.auth.signUp({ email, password });
-    if (authErr) throw authErr;
-    if (!authData.user) throw new Error('Signup fallito');
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error || !data.user) throw error || new Error('Signup error');
 
-    await supabase.from('profiles').insert({
-      id: authData.user.id,
-      email,
-      display_name: displayName,
-      has_completed_setup: false
-    });
-
-    await supabase.from('invites').update({ is_used: true, used_by: authData.user.id, used_at: new Date().toISOString() }).eq('id', invite.id);
+    await supabase.from('profiles').insert({ id: data.user.id, email, display_name: displayName });
+    await supabase.from('invites').update({ is_used: true, used_by: data.user.id, used_at: new Date().toISOString() }).eq('id', invite.id);
   };
 
   const signOut = async () => {
@@ -169,9 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, profile, loading, profileLoading, signIn, signUp, signOut, refreshProfile 
-    }}>
+    <AuthContext.Provider value={{ user, profile, loading, profileLoading, signIn, signUp, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
@@ -179,6 +148,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) throw new Error('useAuth must be used within an AuthProvider');
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
   return context;
 }
