@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Code, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Code, Loader2, CheckCircle2 } from 'lucide-react'; // Rimosso AlertCircle inutilizzato
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface DevelopModalProps {
@@ -131,7 +131,6 @@ export function DevelopModal({ isOpen, onClose, onDevelop }: DevelopModalProps) 
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      {/* max-h-[90dvh] per assicurarsi che il modal non superi mai l'altezza dello schermo mobile */}
       <DialogContent className="bg-gray-900 border-gray-800 text-white max-w-2xl max-h-[90dvh] overflow-hidden flex flex-col p-0">
         <div className="p-6 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
           <DialogHeader className="mb-6">
