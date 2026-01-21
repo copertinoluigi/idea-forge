@@ -40,7 +40,8 @@ export function SummarySidebar({ isOpen, roomId, onClose, onGenerate, loading }:
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-y-0 right-0 w-full md:w-[400px] bg-gray-950 border-l border-gray-800 z-50 flex flex-col shadow-2xl">
+    // Aggiunto pt e pb per gestire Notch e Home Bar su iOS
+    <div className="fixed inset-y-0 right-0 w-full md:w-[400px] bg-gray-950 border-l border-gray-800 z-[60] flex flex-col shadow-2xl pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <div className="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-900/50">
         <div className="flex items-center gap-2">
           <History className="h-5 w-5 text-violet-400" />
@@ -61,7 +62,7 @@ export function SummarySidebar({ isOpen, roomId, onClose, onGenerate, loading }:
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 pb-10">
             <p className="text-[10px] text-gray-500 uppercase font-bold mb-4">Seleziona riassunti da includere nel prossimo context:</p>
             {summaries.map(s => (
               <div key={s.id} className="group relative bg-gray-900/50 border border-gray-800 rounded-xl p-3 hover:border-violet-500/50 transition-all">
@@ -84,7 +85,7 @@ export function SummarySidebar({ isOpen, roomId, onClose, onGenerate, loading }:
             ))}
             
             <Button 
-              className="w-full bg-violet-600 hover:bg-violet-500 mt-6" 
+              className="w-full bg-violet-600 hover:bg-violet-500 mt-6 h-12 font-bold" 
               disabled={loading}
               onClick={() => onGenerate(selectedSummaries)}
             >
