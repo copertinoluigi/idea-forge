@@ -11,7 +11,7 @@ import { format, isToday, isYesterday } from 'date-fns';
 import { it } from 'date-fns/locale';
 import { 
   Send, Sparkles, Code, Settings, LogOut, Plus, Hash, 
-  MessageSquare, ShieldCheck, Loader2, Menu, X, Copy 
+  MessageSquare, ShieldCheck, Loader2, Menu, X
 } from 'lucide-react';
 import type { Database } from '@/lib/database.types';
 
@@ -181,7 +181,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               <div className="flex items-center gap-2">
                 <h2 className="font-bold text-sm text-white uppercase italic truncate max-w-[120px] md:max-w-none">{activeRoom?.name || 'BYOI'}</h2>
                 {!activeRoom?.is_private && activeRoom?.join_code && (
-                  <button onClick={copyJoinCode} className="bg-gray-800 text-[9px] px-2 py-0.5 rounded text-violet-400 font-mono border border-gray-700 hover:text-white active:scale-95 transition-all">#{activeRoom.join_code} <Copy className="h-2.5 w-2.5" /></button>
+                  <button onClick={copyJoinCode} className="bg-gray-800 text-[9px] px-2 py-0.5 rounded text-violet-400 font-mono border border-gray-700 hover:text-white active:scale-95 transition-all">#{activeRoom.join_code}</button>
                 )}
               </div>
               <span className="text-[8px] text-violet-400 font-black uppercase tracking-widest">{activeRoom?.ai_provider} active</span>
@@ -197,9 +197,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           {messages.map((m, index) => {
             const currentDate = new Date(m.created_at);
             const previousDate = index > 0 ? new Date(messages[index - 1].created_at) : null;
-            
-            const showDateSeparator = !previousDate || 
-              format(currentDate, 'yyyy-MM-dd') !== format(previousDate, 'yyyy-MM-dd');
+            const showDateSeparator = !previousDate || format(currentDate, 'yyyy-MM-dd') !== format(previousDate, 'yyyy-MM-dd');
 
             let dateLabel = format(currentDate, 'd MMMM yyyy', { locale: it });
             if (isToday(currentDate)) dateLabel = 'Oggi';
@@ -210,7 +208,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
                 {showDateSeparator && (
                   <div className="flex items-center justify-center my-8 gap-4 px-4">
                     <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-gray-800 to-gray-800" />
-                    <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-500 bg-gray-950 px-3 whitespace-nowrap antialiased">
+                    <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-500 bg-gray-950 px-3 whitespace-nowrap">
                       {dateLabel}
                     </span>
                     <div className="h-[1px] flex-1 bg-gradient-to-l from-transparent via-gray-800 to-gray-800" />
@@ -239,7 +237,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               className="flex-1 bg-gray-900 border-gray-800 text-white rounded-xl focus:ring-1 focus:ring-violet-500/50 min-h-[48px] h-12 max-h-[150px] resize-none text-base py-3 px-4 shadow-inner" 
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 768) { e.preventDefault(); handleSend(e); } }} 
             />
-            <Button type="submit" disabled={loading || !newMessage.trim() || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-xl h-12 w-12 flex-shrink-0 shadow-lg transition-transform active:scale-95 flex items-center justify-center p-0"><Send className="h-5 w-5" /></Button>
+            <Button type="submit" disabled={loading || !newMessage.trim() || !activeRoomId} className="bg-violet-600 hover:bg-violet-500 text-white rounded-xl h-12 w-12 flex-shrink-0 shadow-lg flex items-center justify-center p-0"><Send className="h-5 w-5" /></Button>
           </form>
         </div>
       </main>
