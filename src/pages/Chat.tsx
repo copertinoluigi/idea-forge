@@ -53,10 +53,10 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null); // REF RIPRISTINATA
   
   const { user, profile, signOut, refreshProfile } = useAuth();
   const { toast } = useToast();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomIdRef = useRef(activeRoomId);
   const isInitialLoad = useRef(true);
 
@@ -66,18 +66,26 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     isInitialLoad.current = true;
   }, [activeRoomId]);
 
-  // 1. SNAP-TO-BOTTOM ISTANTANEO (ResizeObserver per gestire immagini caricate)
+  // ═══════════════════════════════════════════════════════════════════
+  // 🚀 LOGICA SNAP-TO-BOTTOM DEFINITIVA (ResizeObserver)
+  // ═══════════════════════════════════════════════════════════════════
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container || messages.length === 0) return;
+    if (!container) return;
 
+    // Funzione per scrollare in fondo in modo istantaneo
     const scrollToBottomInstant = () => {
       container.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
     };
 
+    // Monitoriamo i cambiamenti di dimensione (es. caricamento immagini tardivo)
     const resizeObserver = new ResizeObserver(() => {
-      if (isInitialLoad.current) {
+      if (isInitialLoad.current && messages.length > 0) {
         scrollToBottomInstant();
+        // Disabilitiamo il flag "iniziale" solo dopo che lo scroll è stabile
+        if (container.scrollTop + container.clientHeight >= container.scrollHeight - 10) {
+           // Piccola tolleranza di 10px
+        }
       }
     });
 
@@ -87,6 +95,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     return () => resizeObserver.disconnect();
   }, [messages]);
 
+  // Gestione scroll per i NUOVI messaggi (Smooth)
   const scrollToBottom = (smooth = true) => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTo({
@@ -96,7 +105,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     }
   };
 
-  // 2. PRESENCE & MEMBERS
+  // ═══════════════════════════════════════════════════════════════════
+  // Presence & Sync
   useEffect(() => {
     if (!user || !activeRoomId) return;
 
@@ -116,12 +126,12 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       });
 
     loadMembers(activeRoomId);
+
     return () => { channel.unsubscribe(); };
   }, [user, activeRoomId]);
 
   useEffect(() => { if (user) loadRoomsAndSync(); }, [user]);
 
-  // 3. REALTIME SYNC (Deduplicato per Optimistic UI)
   useEffect(() => {
     if (!activeRoomId) return;
     loadMessages(activeRoomId);
@@ -134,34 +144,31 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         filter: `room_id=eq.${activeRoomId}` 
       }, async (payload) => {
         if (payload.new.room_id !== activeRoomIdRef.current) return;
+        const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
+        setMessages(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, { ...payload.new, profiles: p } as Message]));
         
-        const isOwnMessage = payload.new.user_id === user?.id && !payload.new.is_system;
-
-        if (!isOwnMessage) {
-          const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
-          setMessages(prev => {
-            if (prev.some(m => m.id === payload.new.id)) return prev;
-            return [...prev, { ...payload.new, profiles: p } as Message];
-          });
-        } else {
-          // Conferma messaggio optimistic
-          setMessages(prev => prev.map(m => (m.id.startsWith('temp-') && m.content === payload.new.content) ? { ...payload.new, profiles: { display_name: profile?.display_name } } as Message : m));
-        }
-        
-        isInitialLoad.current = false;
+        // Per i messaggi realtime, scroll fluido
+        isInitialLoad.current = false; // Da qui in poi solo smooth scroll
         setTimeout(() => scrollToBottom(true), 100);
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [activeRoomId, user?.id, profile?.display_name]);
+  }, [activeRoomId]);
 
   const loadMembers = async (roomId: string) => {
     try {
       const { data, error } = await supabase
         .from('room_members')
-        .select(`user_id, user_email, profiles(display_name)`)
+        .select(`user_id, user_email, profiles:user_id ( display_name )`)
         .eq('room_id', roomId);
       
-      if (error) throw error;
+      if (error) {
+        const { data: fallbackData } = await supabase.from('room_members').select('user_id, user_email').eq('room_id', roomId);
+        if (fallbackData) {
+          setMembers(fallbackData.map(m => ({ user_id: m.user_id, user_email: m.user_email, display_name: m.user_email.split('@')[0] })));
+        }
+        return;
+      }
+      
       if (data) {
         setMembers(data.map((m: any) => ({
           user_id: m.user_id,
@@ -218,41 +225,18 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!newMessage.trim() || !user || !activeRoomId || loading) return;
-    
     const content = newMessage.trim();
-    const tempId = `temp-${Date.now()}`;
-    
-    const optimisticMsg: Message = {
-      id: tempId,
-      content,
-      user_id: user.id,
-      room_id: activeRoomId,
-      created_at: new Date().toISOString(),
-      is_system: false,
-      attachments: null,
-      profiles: { display_name: profile?.display_name || 'Io' }
-    };
-
-    setMessages(prev => [...prev, optimisticMsg]);
     setNewMessage('');
     setShowEmojiPicker(false);
-    isInitialLoad.current = false;
-    setTimeout(() => scrollToBottom(true), 50);
-
+    setLoading(true);
     try {
-      setLoading(true); // UTILIZZO DI setLoading
       await supabase.from('messages').insert({ user_id: user.id, content, room_id: activeRoomId });
       const activeR = rooms.find(r => r.id === activeRoomId);
       if (activeR?.is_private) {
         const reply = await chatWithAI({ messages: [{content}], provider: activeR.ai_provider, apiKey: activeR.encrypted_api_key || profile?.encrypted_api_key || '' });
         await supabase.from('messages').insert({ user_id: user.id, content: reply, room_id: activeRoomId, is_system: true });
       }
-    } catch (err) {
-      setMessages(prev => prev.filter(m => m.id !== tempId));
-      toast({ title: "Errore invio", variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const handleFileUpload = async (file: File) => {
@@ -261,15 +245,27 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       toast({ title: "File troppo grande", description: "Il limite è 5MB", variant: "destructive" });
       return;
     }
+
     try {
       setIsUploading(true);
-      const filePath = `${activeRoomId}/${Date.now()}_${file.name}`;
-      await supabase.storage.from('room-assets').upload(filePath, file);
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random().toString(36).slice(2)}_${Date.now()}.${fileExt}`;
+      const filePath = `${activeRoomId}/${fileName}`;
+
+      const { error: upErr } = await supabase.storage.from('room-assets').upload(filePath, file);
+      if (upErr) throw upErr;
+
       const { data: { publicUrl } } = supabase.storage.from('room-assets').getPublicUrl(filePath);
-      await supabase.from('messages').insert({ user_id: user.id, room_id: activeRoomId, content: "", attachments: [{ url: publicUrl, name: file.name, type: file.type }] as any });
+
+      await supabase.from('messages').insert({
+        user_id: user.id, room_id: activeRoomId, content: "",
+        attachments: [{ url: publicUrl, name: file.name, type: file.type }] as any
+      });
     } catch (err) {
-      toast({ title: "Errore upload", variant: "destructive" });
-    } finally { setIsUploading(false); }
+      toast({ title: "Errore durante l'upload", variant: "destructive" });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -282,11 +278,17 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     }
   };
 
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const files = e.dataTransfer.files;
+    if (files.length > 0) handleFileUpload(files[0]);
+  };
+
   const activeRoom = rooms.find(r => r.id === activeRoomId);
   const isAdmin = user?.email === 'info@luigicopertino.it' || user?.email === 'unixgigi@gmail.com';
 
   return (
-    <div className="h-full w-full flex bg-gray-950 text-white overflow-hidden font-sans relative" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if(e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]); }}>
+    <div className="h-full w-full flex bg-gray-950 text-white overflow-hidden font-sans relative" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
       
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
@@ -297,6 +299,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             </div>
             <Button variant="ghost" size="icon" className="md:hidden text-gray-500" onClick={() => setIsSidebarOpen(false)}><X /></Button>
           </div>
+
           <div className="flex-1 overflow-y-auto px-3 py-4 custom-scrollbar">
              <div className="flex items-center justify-between px-3 mb-4">
                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</span>
@@ -312,6 +315,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               </button>
             ))}
           </div>
+
           <div className="p-4 border-t border-gray-800 space-y-1 bg-gray-950/50">
             {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10"><ShieldCheck className="h-4 w-4 mr-2" /> Admin</Button>}
             <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-400 font-bold hover:bg-gray-800 hover:text-white transition-colors"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
@@ -337,7 +341,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
                 <Users className="h-4 w-4" />
               </Button>
             )}
-            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => !m.id.startsWith('temp-') && selectedMessageIds.includes(m.id)), 'snapshot'); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600 animate-pulse' : 'bg-violet-600'} text-white rounded-full font-black px-3 h-8 text-[9px] uppercase shadow-lg shadow-violet-900/30`}><Sparkles className="mr-1 h-3 w-3" /> <span className="hidden xs:inline">{isSelectionMode ? 'Confirm' : 'Summarize'}</span></Button>
+            <Button onClick={() => { if(!isSelectionMode) setIsSelectionMode(true); else { onSummarize(messages.filter(m => selectedMessageIds.includes(m.id)), 'snapshot'); setIsSelectionMode(false); setSelectedMessageIds([]); } }} size="sm" className={`${isSelectionMode ? 'bg-green-600 animate-pulse' : 'bg-violet-600'} text-white rounded-full font-black px-3 h-8 text-[9px] uppercase shadow-lg shadow-violet-900/30`}><Sparkles className="mr-1 h-3 w-3" /> <span className="hidden xs:inline">{isSelectionMode ? 'Confirm' : 'Summarize'}</span></Button>
             <Button onClick={onDevelop} size="sm" className="bg-emerald-600 text-white rounded-full font-black px-3 h-8 text-[9px] uppercase shadow-lg shadow-emerald-900/30"><Code className="mr-1 h-3 w-3" /> <span className="hidden xs:inline">Develop</span></Button>
           </div>
         </header>
@@ -345,16 +349,22 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         {showMembers && !activeRoom?.is_private && (
           <div className="bg-gray-900/90 border-b border-gray-800 p-4 animate-in slide-in-from-top duration-200">
             <div className="flex flex-wrap gap-3">
-              {members.length > 0 ? members.map(m => (
-                <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800 shadow-sm">
-                  <div className={`w-2 h-2 rounded-full ${onlineUsers.includes(m.user_id) ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`} />
-                  <span className="text-[10px] font-bold text-gray-300">{m.display_name}</span>
-                </div>
-              )) : <span className="text-[10px] text-gray-500 italic uppercase font-black tracking-widest">Sincronizzazione membri...</span>}
+              {members.length > 0 ? members.map(m => {
+                const isOnline = onlineUsers.includes(m.user_id);
+                return (
+                  <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800 shadow-sm">
+                    <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`} />
+                    <span className="text-[10px] font-bold text-gray-300">{m.display_name}</span>
+                  </div>
+                );
+              }) : (
+                <span className="text-[10px] text-gray-500 italic uppercase font-black tracking-widest">Sincronizzazione membri...</span>
+              )}
             </div>
           </div>
         )}
 
+        {/* Scrollable Container Ref aggiunto qui */}
         <div 
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar pb-32"
@@ -394,13 +404,16 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
                 ))}
               </div>
             )}
+
             <input type="file" className="hidden" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
+
             <div className="flex gap-1">
               <Button type="button" variant="ghost" size="icon" disabled={isUploading || isSelectionMode} onClick={() => fileInputRef.current?.click()} className="text-gray-400 hover:text-white">
                 {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" />}
               </Button>
               <Button type="button" variant="ghost" size="icon" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`text-gray-400 hover:text-white ${showEmojiPicker ? 'text-violet-400 bg-gray-900' : ''}`}><Smile className="h-5 w-5" /></Button>
             </div>
+
             <Textarea 
               value={newMessage} 
               onChange={(e) => setNewMessage(e.target.value)} 
