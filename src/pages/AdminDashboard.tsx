@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Users, MessageSquare, Database, Shield, 
-  ArrowLeft, Loader2, HardDrive, Activity, 
+  ArrowLeft, Loader2, Activity, 
   Plus, Copy, Check, Trash2, Mail
 } from 'lucide-react';
 
@@ -14,7 +14,6 @@ interface Stats {
   totalRooms: number;
   totalMessages: number;
   dbSizeMB: number;
-  storageSizeMB: number;
 }
 
 interface UserProfile {
@@ -33,7 +32,7 @@ interface Invite {
 
 export function AdminDashboard({ onBack }: { onBack: () => void }) {
   const [stats, setStats] = useState<Stats>({
-    totalUsers: 0, totalRooms: 0, totalMessages: 0, dbSizeMB: 0, storageSizeMB: 0
+    totalUsers: 0, totalRooms: 0, totalMessages: 0, dbSizeMB: 0
   });
   const [userList, setUserList] = useState<UserProfile[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -63,8 +62,7 @@ export function AdminDashboard({ onBack }: { onBack: () => void }) {
         totalUsers: users.count || 0,
         totalRooms: rooms.count || 0,
         totalMessages: messages.count || 0,
-        dbSizeMB: Number(estimatedDbSize.toFixed(2)),
-        storageSizeMB: 0.5 // Stima forfettaria
+        dbSizeMB: Number(estimatedDbSize.toFixed(2))
       });
 
       if (profiles.data) setUserList(profiles.data);
@@ -122,7 +120,6 @@ export function AdminDashboard({ onBack }: { onBack: () => void }) {
     <div className="h-full w-full bg-gray-950 overflow-y-auto custom-scrollbar">
       <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-8 pb-20">
         
-        {/* HEADER */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" onClick={onBack} className="text-gray-400 hover:text-white">
@@ -136,7 +133,6 @@ export function AdminDashboard({ onBack }: { onBack: () => void }) {
           </div>
         </div>
 
-        {/* TOP STATS */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card className="bg-gray-900 border-gray-800">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -154,7 +150,7 @@ export function AdminDashboard({ onBack }: { onBack: () => void }) {
           </Card>
           <Card className="bg-gray-900 border-gray-800">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-[10px] font-bold text-gray-500 uppercase">Database Usage</CardTitle>
+              <CardTitle className="text-[10px] font-bold text-gray-500 uppercase">DB Health</CardTitle>
               <Database className="h-4 w-4 text-rose-400" />
             </CardHeader>
             <CardContent><div className="text-2xl font-black text-white">{dbFillPercent.toFixed(1)}%</div></CardContent>
@@ -168,10 +164,8 @@ export function AdminDashboard({ onBack }: { onBack: () => void }) {
           </Card>
         </div>
 
-        {/* MAIN PANELS */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           
-          {/* USER DIRECTORY */}
           <Card className="bg-gray-900 border-gray-800 flex flex-col h-[500px]">
             <CardHeader className="border-b border-gray-800">
               <CardTitle className="text-sm font-black uppercase text-gray-300 flex items-center gap-2">
@@ -186,7 +180,7 @@ export function AdminDashboard({ onBack }: { onBack: () => void }) {
                       <p className="text-sm font-bold text-white truncate">{u.display_name}</p>
                       <p className="text-[10px] text-gray-500 font-mono">{u.email}</p>
                     </div>
-                    <span className="text-[9px] text-gray-600 font-mono whitespace-nowrap ml-4">
+                    <span className="text-[9px] text-gray-600 font-mono ml-4">
                       {new Date(u.created_at).toLocaleDateString()}
                     </span>
                   </div>
@@ -195,51 +189,32 @@ export function AdminDashboard({ onBack }: { onBack: () => void }) {
             </CardContent>
           </Card>
 
-          {/* INVITATION FACTORY */}
           <Card className="bg-gray-900 border-gray-800 flex flex-col h-[500px]">
             <CardHeader className="border-b border-gray-800 flex flex-row items-center justify-between">
               <CardTitle className="text-sm font-black uppercase text-gray-300 flex items-center gap-2">
                 <Plus className="h-4 w-4 text-emerald-500" /> Invitation Factory
               </CardTitle>
-              <Button 
-                onClick={generateInvite} 
-                disabled={creatingInvite}
-                size="sm" 
-                className="bg-emerald-600 hover:bg-emerald-500 text-[10px] font-black uppercase h-8"
-              >
+              <Button onClick={generateInvite} disabled={creatingInvite} size="sm" className="bg-emerald-600 text-[10px] font-black uppercase h-8">
                 {creatingInvite ? <Loader2 className="h-3 w-3 animate-spin" /> : "Nuovo Codice"}
               </Button>
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto p-0 custom-scrollbar">
               <div className="divide-y divide-gray-800">
-                {invites.length === 0 && (
-                  <div className="p-10 text-center text-gray-600 text-xs uppercase font-bold tracking-widest">Nessun invito attivo</div>
-                )}
                 {invites.map(i => (
                   <div key={i.id} className="p-4 flex items-center justify-between group">
                     <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full ${i.is_used ? 'bg-gray-700' : 'bg-emerald-500 animate-pulse'}`} />
+                      <div className={`w-2 h-2 rounded-full ${i.is_used ? 'bg-gray-700' : 'bg-emerald-500'}`} />
                       <span className={`font-mono text-sm font-bold ${i.is_used ? 'text-gray-600 line-through' : 'text-white'}`}>
                         {i.code}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       {!i.is_used && (
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-gray-500 hover:text-white"
-                          onClick={() => copyToClipboard(i.code)}
-                        >
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => copyToClipboard(i.code)}>
                           {copiedCode === i.code ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
                         </Button>
                       )}
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-8 w-8 text-gray-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={() => deleteInvite(i.id)}
-                      >
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => deleteInvite(i.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
