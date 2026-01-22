@@ -36,7 +36,33 @@ async function getDynamicGeminiModel(apiKey: string, type: string): Promise<stri
   }
 }
 
-// 1. CHAT COLLOQUIALE (Per la Console Privata)
+// Helper per costruire il contenuto multimodale (Testo + Immagini)
+function buildMultimodalContent(text: string, attachments: any[] = []) {
+  const parts: any[] = [];
+  
+  if (text) {
+    parts.push({ type: 'text', text });
+  }
+
+  if (attachments && attachments.length > 0) {
+    attachments.forEach((att) => {
+      // Supportiamo immagini tramite URL pubblico (Supabase Storage è pubblico)
+      if (att.type?.startsWith('image/')) {
+        parts.push({
+          type: 'image',
+          image: new URL(att.url),
+        });
+      } else {
+        // Se non è un'immagine, aggiungiamo una nota testuale all'AI
+        parts.push({ type: 'text', text: `[Allegato file: ${att.name}]` });
+      }
+    });
+  }
+
+  return parts;
+}
+
+// 1. CHAT COLLOQUIALE (Supporta Vision)
 export async function chatWithAI({ messages, provider, apiKey }: { messages: any[], provider: string, apiKey: string }) {
   const config = AI_PROVIDERS.find(p => p.value === provider) || AI_PROVIDERS[0];
   let model;
@@ -50,17 +76,28 @@ export async function chatWithAI({ messages, provider, apiKey }: { messages: any
     model = createAnthropic({ apiKey })(config.model);
   }
 
+  const lastMessage = messages[messages.length - 1];
+  
+  // Costruiamo il contenuto multimodale per l'ultimo messaggio ricevuto
+  const multimodalContent = buildMultimodalContent(lastMessage.content, lastMessage.attachments);
+
   const { text } = await generateText({
     model,
-    system: "Sei un assistente AI versatile. Rispondi in modo naturale e colloquiale. Puoi aiutare con il codice, rispondere a domande generali o semplicemente chiacchierare. Non usare prompt da startup coach qui.",
-    prompt: messages[messages.length - 1].content,
+    system: "Sei un assistente AI versatile. Se ti vengono inviate immagini, analizzale con cura per rispondere alle richieste. Rispondi in modo naturale e colloquiale. Non usare prompt da startup coach qui.",
+    content: multimodalContent,
     temperature: 0.2,
   });
   return text;
 }
 
-// 2. ANALISI SUMMARIZE (Per le Stanze di Gruppo)
-export async function summarizeConversation({ messages, previousSummaries = [], provider, apiKey }: any) {
+// 2. ANALISI SUMMARIZE (Supporta Vision Context)
+export async function summarizeConversation({ 
+  messages, 
+  previousSummaries = [], 
+  provider, 
+  apiKey,
+  customInstructions 
+}: any) {
   const config = AI_PROVIDERS.find(p => p.value === provider) || AI_PROVIDERS[0];
   let model;
 
@@ -73,14 +110,36 @@ export async function summarizeConversation({ messages, previousSummaries = [], 
     model = createAnthropic({ apiKey })(config.model);
   }
 
-  const conversationText = messages.map((m: any) => `${m.user}: ${m.content}`).join('\n');
-  const contextLayers = previousSummaries.length > 0 ? `\n\nCONTESTO PRECEDENTE:\n${previousSummaries.join('\n---\n')}` : '';
+  // Prepariamo i blocchi di conversazione includendo descrizioni di eventuali immagini
+  const promptParts: any[] = [
+    { type: 'text', text: `${customInstructions || "Analizza questa conversazione."}\n\n` }
+  ];
+
+  if (previousSummaries.length > 0) {
+    promptParts.push({ type: 'text', text: `CONTESTO PRECEDENTE:\n${previousSummaries.join('\n---\n')}\n\n` });
+  }
+
+  promptParts.push({ type: 'text', text: "NUOVI MESSAGGI DA ELABORARE:\n" });
+
+  // Iteriamo sui messaggi per includere testo ed eventuali immagini nel riassunto
+  messages.forEach((m: any) => {
+    promptParts.push({ type: 'text', text: `${m.user}: ${m.content}\n` });
+    
+    if (m.attachments && m.attachments.length > 0) {
+      m.attachments.forEach((att: any) => {
+        if (att.type?.startsWith('image/')) {
+          promptParts.push({ type: 'image', image: new URL(att.url) });
+        }
+      });
+    }
+  });
 
   const { text } = await generateText({
     model,
-    system: "Sei un esperto Startup Coach. Il tuo compito è analizzare la chat e distillare insights critici, roadmap e analisi di mercato. Sii molto professionale e tecnico.",
-    prompt: `Analizza questa conversazione.${contextLayers}\n\nNUOVI MESSAGGI:\n${conversationText}`,
+    system: "Sei un esperto Startup Coach & Business Analyst. Il tuo compito è analizzare testo e immagini inviate per distillare insights, roadmap e asset strutturati. Se vedi screenshot di UI o loghi, descrivili e integrali nell'analisi.",
+    content: promptParts,
     temperature: 0.0,
   });
+  
   return text;
 }
