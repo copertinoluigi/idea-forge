@@ -20,7 +20,7 @@ type Room = Database['public']['Tables']['rooms']['Row'];
 type Member = { 
   user_id: string; 
   user_email: string; 
-  profiles: { display_name: string } | null 
+  display_name: string;
 };
 
 const EMOJIS = ["😊", "😂", "🚀", "💡", "🔥", "✅", "❌", "🤔", "👍", "🎨", "💻", "🤖", "📈", "📅", "🔒", "✨", "🎯", "📝", "🌍", "⚡"];
@@ -57,8 +57,12 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomIdRef = useRef(activeRoomId);
+  const isFirstLoadRef = useRef(true); // Per gestire lo scroll istantaneo
 
-  useEffect(() => { activeRoomIdRef.current = activeRoomId; }, [activeRoomId]);
+  useEffect(() => { 
+    activeRoomIdRef.current = activeRoomId;
+    isFirstLoadRef.current = true; // Resetta al cambio stanza
+  }, [activeRoomId]);
 
   // Presence & Sync
   useEffect(() => {
@@ -89,6 +93,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   useEffect(() => {
     if (!activeRoomId) return;
     loadMessages(activeRoomId);
+    
     const channel = supabase.channel(`room-messages-${activeRoomId}`)
       .on('postgres_changes', { 
         event: 'INSERT', 
@@ -99,25 +104,32 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         if (payload.new.room_id !== activeRoomIdRef.current) return;
         const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
         setMessages(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, { ...payload.new, profiles: p } as Message]));
-        setTimeout(scrollToBottom, 50);
+        // Scroll fluido solo per nuovi messaggi in arrivo
+        setTimeout(() => scrollToBottom(true), 50);
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [activeRoomId]);
 
-  // FUNZIONE REVISIONATA CHIRURGICAMENTE
   const loadMembers = async (roomId: string) => {
-    console.log("Loading members for room:", roomId);
     try {
       const { data, error } = await supabase
         .from('room_members')
-        .select('user_id, user_email, profiles(display_name)')
+        .select(`
+          user_id,
+          user_email,
+          profiles:user_id ( display_name )
+        `)
         .eq('room_id', roomId);
       
       if (error) throw error;
       
       if (data) {
-        console.log("Members loaded:", data);
-        setMembers(data as any);
+        const formatted = data.map((m: any) => ({
+          user_id: m.user_id,
+          user_email: m.user_email,
+          display_name: m.profiles?.display_name || m.user_email.split('@')[0]
+        }));
+        setMembers(formatted);
       }
     } catch (err) {
       console.error("Error in loadMembers:", err);
@@ -151,8 +163,14 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
 
   const loadMessages = async (id: string) => {
     const { data } = await supabase.from('messages').select('*, profiles(display_name)').eq('room_id', id).order('created_at', { ascending: true });
-    if (data) setMessages(data as Message[]);
-    setTimeout(scrollToBottom, 100);
+    if (data) {
+      setMessages(data as Message[]);
+      // Scroll istantaneo per il caricamento iniziale (rimuove l'effetto scivolamento)
+      setTimeout(() => {
+        scrollToBottom(false);
+        isFirstLoadRef.current = false;
+      }, 0);
+    }
   };
 
   const handleRoomSwitch = async (id: string) => {
@@ -226,7 +244,12 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     if (files.length > 0) handleFileUpload(files[0]);
   };
 
-  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (smooth = true) => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    }
+  };
+
   const activeRoom = rooms.find(r => r.id === activeRoomId);
   const isAdmin = user?.email === 'info@luigicopertino.it' || user?.email === 'unixgigi@gmail.com';
 
@@ -294,15 +317,14 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             <div className="flex flex-wrap gap-3">
               {members.length > 0 ? members.map(m => {
                 const isOnline = onlineUsers.includes(m.user_id);
-                const name = m.profiles?.display_name || m.user_email.split('@')[0];
                 return (
                   <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800">
                     <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`} />
-                    <span className="text-[10px] font-bold text-gray-300">{name}</span>
+                    <span className="text-[10px] font-bold text-gray-300">{m.display_name}</span>
                   </div>
                 );
               }) : (
-                <span className="text-[10px] text-gray-500 italic">Nessun membro trovato</span>
+                <span className="text-[10px] text-gray-500 italic uppercase font-black tracking-widest">Nessun membro rilevato</span>
               )}
             </div>
           </div>
