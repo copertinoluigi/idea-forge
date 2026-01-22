@@ -53,6 +53,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null); // REF RIPRISTINATA
   
   const { user, profile, signOut, refreshProfile } = useAuth();
   const { toast } = useToast();
@@ -65,7 +66,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     isInitialLoad.current = true;
   }, [activeRoomId]);
 
-  // 1. SNAP-TO-BOTTOM ISTANTANEO (Zero scivolamento visibile)
+  // 1. SNAP-TO-BOTTOM ISTANTANEO (ResizeObserver per gestire immagini caricate)
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container || messages.length === 0) return;
@@ -74,7 +75,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       container.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
     };
 
-    // Monitora il caricamento di immagini o blocchi codice che cambiano l'altezza
     const resizeObserver = new ResizeObserver(() => {
       if (isInitialLoad.current) {
         scrollToBottomInstant();
@@ -135,27 +135,18 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       }, async (payload) => {
         if (payload.new.room_id !== activeRoomIdRef.current) return;
         
-        // Se il messaggio è dell'utente corrente ed è appena stato inviato, 
-        // l'Optimistic UI lo ha già inserito. Verifichiamo la presenza per ID reale.
-        setMessages(prev => {
-          if (prev.some(m => m.id === payload.new.id)) return prev;
-          
-          // Se arriva il messaggio reale del DB, puliamo eventuali temp rimasti
-          const filtered = prev.filter(m => !m.id.startsWith('temp-'));
-          
-          // Recupero profilo per il nome
-          const fetchAndAdd = async () => {
-             const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
-             setMessages(current => [...current.filter(m => !m.id.startsWith('temp-')), { ...payload.new, profiles: p } as Message]);
-          };
-          
-          if (payload.new.user_id !== user?.id || payload.new.is_system) {
-            fetchAndAdd();
-            return prev;
-          }
-          
-          return [...filtered, { ...payload.new, profiles: { display_name: profile?.display_name } } as Message];
-        });
+        const isOwnMessage = payload.new.user_id === user?.id && !payload.new.is_system;
+
+        if (!isOwnMessage) {
+          const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
+          setMessages(prev => {
+            if (prev.some(m => m.id === payload.new.id)) return prev;
+            return [...prev, { ...payload.new, profiles: p } as Message];
+          });
+        } else {
+          // Conferma messaggio optimistic
+          setMessages(prev => prev.map(m => (m.id.startsWith('temp-') && m.content === payload.new.content) ? { ...payload.new, profiles: { display_name: profile?.display_name } } as Message : m));
+        }
         
         isInitialLoad.current = false;
         setTimeout(() => scrollToBottom(true), 100);
@@ -224,7 +215,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     }
   };
 
-  // 4. OPTIMISTIC SEND
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!newMessage.trim() || !user || !activeRoomId || loading) return;
@@ -250,6 +240,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     setTimeout(() => scrollToBottom(true), 50);
 
     try {
+      setLoading(true); // UTILIZZO DI setLoading
       await supabase.from('messages').insert({ user_id: user.id, content, room_id: activeRoomId });
       const activeR = rooms.find(r => r.id === activeRoomId);
       if (activeR?.is_private) {
@@ -259,6 +250,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== tempId));
       toast({ title: "Errore invio", variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
   };
 
