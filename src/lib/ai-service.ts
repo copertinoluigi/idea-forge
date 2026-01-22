@@ -36,7 +36,7 @@ async function getDynamicGeminiModel(apiKey: string, type: string): Promise<stri
   }
 }
 
-// Helper per costruire il contenuto multimodale (Testo + Immagini)
+// Helper per costruire il contenuto multimodale corretto per l'SDK
 function buildMultimodalContent(text: string, attachments: any[] = []) {
   const parts: any[] = [];
   
@@ -46,14 +46,12 @@ function buildMultimodalContent(text: string, attachments: any[] = []) {
 
   if (attachments && attachments.length > 0) {
     attachments.forEach((att) => {
-      // Supportiamo immagini tramite URL pubblico (Supabase Storage è pubblico)
       if (att.type?.startsWith('image/')) {
         parts.push({
           type: 'image',
           image: new URL(att.url),
         });
       } else {
-        // Se non è un'immagine, aggiungiamo una nota testuale all'AI
         parts.push({ type: 'text', text: `[Allegato file: ${att.name}]` });
       }
     });
@@ -77,14 +75,17 @@ export async function chatWithAI({ messages, provider, apiKey }: { messages: any
   }
 
   const lastMessage = messages[messages.length - 1];
-  
-  // Costruiamo il contenuto multimodale per l'ultimo messaggio ricevuto
   const multimodalContent = buildMultimodalContent(lastMessage.content, lastMessage.attachments);
 
   const { text } = await generateText({
     model,
-    system: "Sei un assistente AI versatile. Se ti vengono inviate immagini, analizzale con cura per rispondere alle richieste. Rispondi in modo naturale e colloquiale. Non usare prompt da startup coach qui.",
-    content: multimodalContent,
+    system: "Sei un assistente AI versatile. Se ti vengono inviate immagini, analizzale con cura per rispondere alle richieste. Rispondi in modo naturale e colloquiale.",
+    messages: [
+      {
+        role: 'user',
+        content: multimodalContent,
+      }
+    ],
     temperature: 0.2,
   });
   return text;
@@ -110,7 +111,6 @@ export async function summarizeConversation({
     model = createAnthropic({ apiKey })(config.model);
   }
 
-  // Prepariamo i blocchi di conversazione includendo descrizioni di eventuali immagini
   const promptParts: any[] = [
     { type: 'text', text: `${customInstructions || "Analizza questa conversazione."}\n\n` }
   ];
@@ -121,7 +121,6 @@ export async function summarizeConversation({
 
   promptParts.push({ type: 'text', text: "NUOVI MESSAGGI DA ELABORARE:\n" });
 
-  // Iteriamo sui messaggi per includere testo ed eventuali immagini nel riassunto
   messages.forEach((m: any) => {
     promptParts.push({ type: 'text', text: `${m.user}: ${m.content}\n` });
     
@@ -136,8 +135,13 @@ export async function summarizeConversation({
 
   const { text } = await generateText({
     model,
-    system: "Sei un esperto Startup Coach & Business Analyst. Il tuo compito è analizzare testo e immagini inviate per distillare insights, roadmap e asset strutturati. Se vedi screenshot di UI o loghi, descrivili e integrali nell'analisi.",
-    content: promptParts,
+    system: "Sei un esperto Startup Coach & Business Analyst. Il tuo compito è analizzare testo e immagini inviate per distillare insights, roadmap e asset strutturati.",
+    messages: [
+      {
+        role: 'user',
+        content: promptParts,
+      }
+    ],
     temperature: 0.0,
   });
   
