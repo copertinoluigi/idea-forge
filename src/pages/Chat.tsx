@@ -66,46 +66,33 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     isInitialLoad.current = true;
   }, [activeRoomId]);
 
-  // ═══════════════════════════════════════════════════════════════════
-  // 🚀 LOGICA SNAP-TO-BOTTOM DEFINITIVA (ResizeObserver)
-  // ═══════════════════════════════════════════════════════════════════
+  // FIX SCROLL: Snap istantaneo al caricamento della stanza
   useLayoutEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    // Funzione per scrollare in fondo in modo istantaneo
-    const scrollToBottomInstant = () => {
-      container.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
-    };
-
-    // Monitoriamo i cambiamenti di dimensione (es. caricamento immagini tardivo)
-    const resizeObserver = new ResizeObserver(() => {
-      if (isInitialLoad.current && messages.length > 0) {
-        scrollToBottomInstant();
-        // Disabilitiamo il flag "iniziale" solo dopo che lo scroll è stabile
-        if (container.scrollTop + container.clientHeight >= container.scrollHeight - 10) {
-           // Piccola tolleranza di 10px
-        }
+    if (messages.length > 0 && isInitialLoad.current) {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        // Diamo tempo alle immagini di caricare e rifacciamo uno snap dopo 300ms
+        const timer = setTimeout(() => {
+          if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+          }
+          isInitialLoad.current = false;
+        }, 300);
+        return () => clearTimeout(timer);
       }
-    });
-
-    resizeObserver.observe(container);
-    scrollToBottomInstant();
-
-    return () => resizeObserver.disconnect();
+    }
   }, [messages]);
 
-  // Gestione scroll per i NUOVI messaggi (Smooth)
+  // Funzione scroll centralizzata
   const scrollToBottom = (smooth = true) => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTo({
         top: scrollContainerRef.current.scrollHeight,
-        behavior: smooth ? 'smooth' : 'instant'
+        behavior: smooth ? 'smooth' : 'auto'
       });
     }
   };
 
-  // ═══════════════════════════════════════════════════════════════════
   // Presence & Sync
   useEffect(() => {
     if (!user || !activeRoomId) return;
@@ -126,12 +113,12 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       });
 
     loadMembers(activeRoomId);
-
     return () => { channel.unsubscribe(); };
   }, [user, activeRoomId]);
 
   useEffect(() => { if (user) loadRoomsAndSync(); }, [user]);
 
+  // Realtime Messages
   useEffect(() => {
     if (!activeRoomId) return;
     loadMessages(activeRoomId);
@@ -144,16 +131,22 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         filter: `room_id=eq.${activeRoomId}` 
       }, async (payload) => {
         if (payload.new.room_id !== activeRoomIdRef.current) return;
-        const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
-        setMessages(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, { ...payload.new, profiles: p } as Message]));
         
-        // Per i messaggi realtime, scroll fluido
-        isInitialLoad.current = false; // Da qui in poi solo smooth scroll
-        setTimeout(() => scrollToBottom(true), 100);
+        const isOwn = payload.new.user_id === user?.id;
+        const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
+        
+        setMessages(prev => {
+          if (prev.some(m => m.id === payload.new.id)) return prev;
+          return [...prev, { ...payload.new, profiles: p } as Message];
+        });
+        
+        // Se il messaggio è di altri, scroll fluido. Se è nostro, scroll istantaneo per reattività
+        setTimeout(() => scrollToBottom(!isOwn), 100);
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [activeRoomId]);
+  }, [activeRoomId, user?.id]);
 
+  // Fix caricamento membri (Query semplificata per performance)
   const loadMembers = async (roomId: string) => {
     try {
       const { data, error } = await supabase
@@ -161,13 +154,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         .select(`user_id, user_email, profiles:user_id ( display_name )`)
         .eq('room_id', roomId);
       
-      if (error) {
-        const { data: fallbackData } = await supabase.from('room_members').select('user_id, user_email').eq('room_id', roomId);
-        if (fallbackData) {
-          setMembers(fallbackData.map(m => ({ user_id: m.user_id, user_email: m.user_email, display_name: m.user_email.split('@')[0] })));
-        }
-        return;
-      }
+      if (error) throw error;
       
       if (data) {
         setMembers(data.map((m: any) => ({
@@ -245,27 +232,15 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       toast({ title: "File troppo grande", description: "Il limite è 5MB", variant: "destructive" });
       return;
     }
-
     try {
       setIsUploading(true);
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random().toString(36).slice(2)}_${Date.now()}.${fileExt}`;
-      const filePath = `${activeRoomId}/${fileName}`;
-
-      const { error: upErr } = await supabase.storage.from('room-assets').upload(filePath, file);
-      if (upErr) throw upErr;
-
+      const filePath = `${activeRoomId}/${Date.now()}_${file.name}`;
+      await supabase.storage.from('room-assets').upload(filePath, file);
       const { data: { publicUrl } } = supabase.storage.from('room-assets').getPublicUrl(filePath);
-
-      await supabase.from('messages').insert({
-        user_id: user.id, room_id: activeRoomId, content: "",
-        attachments: [{ url: publicUrl, name: file.name, type: file.type }] as any
-      });
+      await supabase.from('messages').insert({ user_id: user.id, room_id: activeRoomId, content: "", attachments: [{ url: publicUrl, name: file.name, type: file.type }] as any });
     } catch (err) {
       toast({ title: "Errore durante l'upload", variant: "destructive" });
-    } finally {
-      setIsUploading(false);
-    }
+    } finally { setIsUploading(false); }
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -278,17 +253,11 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const files = e.dataTransfer.files;
-    if (files.length > 0) handleFileUpload(files[0]);
-  };
-
   const activeRoom = rooms.find(r => r.id === activeRoomId);
   const isAdmin = user?.email === 'info@luigicopertino.it' || user?.email === 'unixgigi@gmail.com';
 
   return (
-    <div className="h-full w-full flex bg-gray-950 text-white overflow-hidden font-sans relative" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
+    <div className="h-full w-full flex bg-gray-950 text-white overflow-hidden font-sans relative" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if(e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]); }}>
       
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
@@ -349,22 +318,16 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         {showMembers && !activeRoom?.is_private && (
           <div className="bg-gray-900/90 border-b border-gray-800 p-4 animate-in slide-in-from-top duration-200">
             <div className="flex flex-wrap gap-3">
-              {members.length > 0 ? members.map(m => {
-                const isOnline = onlineUsers.includes(m.user_id);
-                return (
-                  <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800 shadow-sm">
-                    <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`} />
-                    <span className="text-[10px] font-bold text-gray-300">{m.display_name}</span>
-                  </div>
-                );
-              }) : (
-                <span className="text-[10px] text-gray-500 italic uppercase font-black tracking-widest">Sincronizzazione membri...</span>
-              )}
+              {members.length > 0 ? members.map(m => (
+                <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800 shadow-sm">
+                  <div className={`w-2 h-2 rounded-full ${onlineUsers.includes(m.user_id) ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`} />
+                  <span className="text-[10px] font-bold text-gray-300">{m.display_name}</span>
+                </div>
+              )) : <span className="text-[10px] text-gray-500 italic uppercase font-black tracking-widest">Sincronizzazione membri...</span>}
             </div>
           </div>
         )}
 
-        {/* Scrollable Container Ref aggiunto qui */}
         <div 
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar pb-32"
