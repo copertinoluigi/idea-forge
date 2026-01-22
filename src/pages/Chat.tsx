@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
@@ -52,18 +52,29 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [isUploading, setIsUploading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null); // Ref per lo scroll istantaneo
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   
   const { user, profile, signOut, refreshProfile } = useAuth();
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomIdRef = useRef(activeRoomId);
+  const isInitialLoad = useRef(true); // Flag per gestire lo scroll istantaneo
 
   useEffect(() => { 
     activeRoomIdRef.current = activeRoomId;
-    // Quando cambiamo stanza, resettiamo la vista dei membri
     setShowMembers(false);
+    isInitialLoad.current = true; // Ogni volta che cambia stanza, resettiamo il flag
   }, [activeRoomId]);
+
+  // Gestione istantanea dello scroll al caricamento messaggi
+  useLayoutEffect(() => {
+    if (messages.length > 0 && isInitialLoad.current) {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        isInitialLoad.current = false;
+      }
+    }
+  }, [messages]);
 
   // Presence & Sync
   useEffect(() => {
@@ -105,36 +116,24 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         if (payload.new.room_id !== activeRoomIdRef.current) return;
         const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
         setMessages(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, { ...payload.new, profiles: p } as Message]));
+        
+        // Per i messaggi realtime, usiamo lo scroll fluido
         setTimeout(() => scrollToBottom(true), 100);
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [activeRoomId]);
 
-  // Fix caricamento membri con sintassi join esplicita
   const loadMembers = async (roomId: string) => {
     try {
       const { data, error } = await supabase
         .from('room_members')
-        .select(`
-          user_id,
-          user_email,
-          profiles!inner ( display_name )
-        `)
+        .select(`user_id, user_email, profiles:user_id ( display_name )`)
         .eq('room_id', roomId);
       
       if (error) {
-        // Fallback: se il join fallisce, carichiamo almeno le email
-        const { data: fallbackData } = await supabase
-          .from('room_members')
-          .select('user_id, user_email')
-          .eq('room_id', roomId);
-        
+        const { data: fallbackData } = await supabase.from('room_members').select('user_id, user_email').eq('room_id', roomId);
         if (fallbackData) {
-          setMembers(fallbackData.map(m => ({
-            user_id: m.user_id,
-            user_email: m.user_email,
-            display_name: m.user_email.split('@')[0]
-          })));
+          setMembers(fallbackData.map(m => ({ user_id: m.user_id, user_email: m.user_email, display_name: m.user_email.split('@')[0] })));
         }
         return;
       }
@@ -147,7 +146,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         })));
       }
     } catch (err) {
-      console.error("Critical error loadMembers:", err);
+      console.error("Error loadMembers:", err);
     }
   };
 
@@ -180,12 +179,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     const { data } = await supabase.from('messages').select('*, profiles(display_name)').eq('room_id', id).order('created_at', { ascending: true });
     if (data) {
       setMessages(data as Message[]);
-      // Scroll istantaneo: forziamo la posizione alla fine della lista senza animazione
-      requestAnimationFrame(() => {
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-        }
-      });
     }
   };
 
@@ -227,16 +220,10 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       const fileExt = file.name.split('.').pop();
       const fileName = `${Math.random().toString(36).slice(2)}_${Date.now()}.${fileExt}`;
       const filePath = `${activeRoomId}/${fileName}`;
-
       const { error: upErr } = await supabase.storage.from('room-assets').upload(filePath, file);
       if (upErr) throw upErr;
-
       const { data: { publicUrl } } = supabase.storage.from('room-assets').getPublicUrl(filePath);
-
-      await supabase.from('messages').insert({
-        user_id: user.id, room_id: activeRoomId, content: "",
-        attachments: [{ url: publicUrl, name: file.name, type: file.type }] as any
-      });
+      await supabase.from('messages').insert({ user_id: user.id, room_id: activeRoomId, content: "", attachments: [{ url: publicUrl, name: file.name, type: file.type }] as any });
     } catch (err) {
       toast({ title: "Errore durante l'upload", variant: "destructive" });
     } finally {
@@ -334,7 +321,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               {members.length > 0 ? members.map(m => {
                 const isOnline = onlineUsers.includes(m.user_id);
                 return (
-                  <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800 shadow-sm">
+                  <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800">
                     <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`} />
                     <span className="text-[10px] font-bold text-gray-300">{m.display_name}</span>
                   </div>
@@ -346,10 +333,10 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </div>
         )}
 
-        {/* Scrollable Container Ref aggiunto qui */}
         <div 
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar pb-32"
+          style={{ overflowAnchor: 'auto' }} 
         >
           {messages.map((m, index) => {
             const currentDate = new Date(m.created_at);
