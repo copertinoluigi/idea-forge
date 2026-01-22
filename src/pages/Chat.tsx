@@ -56,7 +56,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   
   const { user, profile, signOut, refreshProfile } = useAuth();
   const { toast } = useToast();
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomIdRef = useRef(activeRoomId);
   const isInitialLoad = useRef(true);
 
@@ -66,16 +65,18 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     isInitialLoad.current = true;
   }, [activeRoomId]);
 
+  // 1. SNAP-TO-BOTTOM ISTANTANEO (Zero scivolamento visibile)
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container) return;
+    if (!container || messages.length === 0) return;
 
     const scrollToBottomInstant = () => {
       container.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
     };
 
+    // Monitora il caricamento di immagini o blocchi codice che cambiano l'altezza
     const resizeObserver = new ResizeObserver(() => {
-      if (isInitialLoad.current && messages.length > 0) {
+      if (isInitialLoad.current) {
         scrollToBottomInstant();
       }
     });
@@ -95,6 +96,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     }
   };
 
+  // 2. PRESENCE & MEMBERS
   useEffect(() => {
     if (!user || !activeRoomId) return;
 
@@ -114,13 +116,12 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       });
 
     loadMembers(activeRoomId);
-
     return () => { channel.unsubscribe(); };
   }, [user, activeRoomId]);
 
   useEffect(() => { if (user) loadRoomsAndSync(); }, [user]);
 
-  // FIX REALTIME: Ottimizzato per evitare duplicati con l'Optimistic UI
+  // 3. REALTIME SYNC (Deduplicato per Optimistic UI)
   useEffect(() => {
     if (!activeRoomId) return;
     loadMessages(activeRoomId);
@@ -134,42 +135,42 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       }, async (payload) => {
         if (payload.new.room_id !== activeRoomIdRef.current) return;
         
-        // Se il messaggio è mio, l'ho già aggiunto con l'Optimistic UI (a meno che non sia un messaggio di sistema)
-        if (payload.new.user_id === user?.id && !payload.new.is_system) {
-          // Aggiorniamo solo l'ID temporaneo con quello reale del DB se necessario, 
-          // ma per semplicità lasciamo che il Realtime ignori i nostri insert se già presenti
-          setMessages(prev => {
-            if (prev.some(m => m.id === payload.new.id)) return prev;
-            // Se esiste un messaggio con lo stesso contenuto inviato negli ultimi 2 secondi, lo sostituiamo o ignoriamo
-            return [...prev.filter(m => !m.id.startsWith('temp-')), { ...payload.new, profiles: { display_name: profile?.display_name } } as Message];
-          });
-        } else {
-          // Messaggio degli altri utenti o di sistema (AI)
-          const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
-          setMessages(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, { ...payload.new, profiles: p } as Message]));
-        }
+        // Se il messaggio è dell'utente corrente ed è appena stato inviato, 
+        // l'Optimistic UI lo ha già inserito. Verifichiamo la presenza per ID reale.
+        setMessages(prev => {
+          if (prev.some(m => m.id === payload.new.id)) return prev;
+          
+          // Se arriva il messaggio reale del DB, puliamo eventuali temp rimasti
+          const filtered = prev.filter(m => !m.id.startsWith('temp-'));
+          
+          // Recupero profilo per il nome
+          const fetchAndAdd = async () => {
+             const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
+             setMessages(current => [...current.filter(m => !m.id.startsWith('temp-')), { ...payload.new, profiles: p } as Message]);
+          };
+          
+          if (payload.new.user_id !== user?.id || payload.new.is_system) {
+            fetchAndAdd();
+            return prev;
+          }
+          
+          return [...filtered, { ...payload.new, profiles: { display_name: profile?.display_name } } as Message];
+        });
         
         isInitialLoad.current = false;
         setTimeout(() => scrollToBottom(true), 100);
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [activeRoomId, user?.id]);
+  }, [activeRoomId, user?.id, profile?.display_name]);
 
   const loadMembers = async (roomId: string) => {
     try {
       const { data, error } = await supabase
         .from('room_members')
-        .select(`user_id, user_email, profiles:user_id ( display_name )`)
+        .select(`user_id, user_email, profiles(display_name)`)
         .eq('room_id', roomId);
       
-      if (error) {
-        const { data: fallbackData } = await supabase.from('room_members').select('user_id, user_email').eq('room_id', roomId);
-        if (fallbackData) {
-          setMembers(fallbackData.map(m => ({ user_id: m.user_id, user_email: m.user_email, display_name: m.user_email.split('@')[0] })));
-        }
-        return;
-      }
-      
+      if (error) throw error;
       if (data) {
         setMembers(data.map((m: any) => ({
           user_id: m.user_id,
@@ -223,9 +224,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     }
   };
 
-  // ═══════════════════════════════════════════════════════════════════
-  // ⚡ HANDLE SEND CON OPTIMISTIC UI
-  // ═══════════════════════════════════════════════════════════════════
+  // 4. OPTIMISTIC SEND
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!newMessage.trim() || !user || !activeRoomId || loading) return;
@@ -233,10 +232,9 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     const content = newMessage.trim();
     const tempId = `temp-${Date.now()}`;
     
-    // 1. Aggiunta istantanea allo stato locale (Optimistic)
-    const optimisticMessage: Message = {
+    const optimisticMsg: Message = {
       id: tempId,
-      content: content,
+      content,
       user_id: user.id,
       room_id: activeRoomId,
       created_at: new Date().toISOString(),
@@ -244,47 +242,21 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       attachments: null,
       profiles: { display_name: profile?.display_name || 'Io' }
     };
-    
-    setMessages(prev => [...prev, optimisticMessage]);
+
+    setMessages(prev => [...prev, optimisticMsg]);
     setNewMessage('');
     setShowEmojiPicker(false);
+    isInitialLoad.current = false;
     setTimeout(() => scrollToBottom(true), 50);
 
-    // 2. Invio reale al database
     try {
-      const { data: insertedMsg, error } = await supabase
-        .from('messages')
-        .insert({ user_id: user.id, content, room_id: activeRoomId })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // Sostituiamo il tempId con quello reale (opzionale, il realtime farà il resto)
-      if (insertedMsg) {
-        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: insertedMsg.id } : m));
-      }
-
-      // 3. Gestione AI se stanza privata
+      await supabase.from('messages').insert({ user_id: user.id, content, room_id: activeRoomId });
       const activeR = rooms.find(r => r.id === activeRoomId);
       if (activeR?.is_private) {
-        setLoading(true);
-        const reply = await chatWithAI({ 
-          messages: [{content}], 
-          provider: activeR.ai_provider, 
-          apiKey: activeR.encrypted_api_key || profile?.encrypted_api_key || '' 
-        });
-        await supabase.from('messages').insert({ 
-          user_id: user.id, 
-          content: reply, 
-          room_id: activeRoomId, 
-          is_system: true 
-        });
-        setLoading(false);
+        const reply = await chatWithAI({ messages: [{content}], provider: activeR.ai_provider, apiKey: activeR.encrypted_api_key || profile?.encrypted_api_key || '' });
+        await supabase.from('messages').insert({ user_id: user.id, content: reply, room_id: activeRoomId, is_system: true });
       }
     } catch (err) {
-      console.error("Send error:", err);
-      // Rimuoviamo il messaggio se l'invio è fallito
       setMessages(prev => prev.filter(m => m.id !== tempId));
       toast({ title: "Errore invio", variant: "destructive" });
     }
@@ -296,27 +268,15 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       toast({ title: "File troppo grande", description: "Il limite è 5MB", variant: "destructive" });
       return;
     }
-
     try {
       setIsUploading(true);
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random().toString(36).slice(2)}_${Date.now()}.${fileExt}`;
-      const filePath = `${activeRoomId}/${fileName}`;
-
-      const { error: upErr } = await supabase.storage.from('room-assets').upload(filePath, file);
-      if (upErr) throw upErr;
-
+      const filePath = `${activeRoomId}/${Date.now()}_${file.name}`;
+      await supabase.storage.from('room-assets').upload(filePath, file);
       const { data: { publicUrl } } = supabase.storage.from('room-assets').getPublicUrl(filePath);
-
-      await supabase.from('messages').insert({
-        user_id: user.id, room_id: activeRoomId, content: "",
-        attachments: [{ url: publicUrl, name: file.name, type: file.type }] as any
-      });
+      await supabase.from('messages').insert({ user_id: user.id, room_id: activeRoomId, content: "", attachments: [{ url: publicUrl, name: file.name, type: file.type }] as any });
     } catch (err) {
-      toast({ title: "Errore durante l'upload", variant: "destructive" });
-    } finally {
-      setIsUploading(false);
-    }
+      toast({ title: "Errore upload", variant: "destructive" });
+    } finally { setIsUploading(false); }
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -329,17 +289,11 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const files = e.dataTransfer.files;
-    if (files.length > 0) handleFileUpload(files[0]);
-  };
-
   const activeRoom = rooms.find(r => r.id === activeRoomId);
   const isAdmin = user?.email === 'info@luigicopertino.it' || user?.email === 'unixgigi@gmail.com';
 
   return (
-    <div className="h-full w-full flex bg-gray-950 text-white overflow-hidden font-sans relative" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
+    <div className="h-full w-full flex bg-gray-950 text-white overflow-hidden font-sans relative" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if(e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]); }}>
       
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 border-r border-gray-800 transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
@@ -350,7 +304,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
             </div>
             <Button variant="ghost" size="icon" className="md:hidden text-gray-500" onClick={() => setIsSidebarOpen(false)}><X /></Button>
           </div>
-
           <div className="flex-1 overflow-y-auto px-3 py-4 custom-scrollbar">
              <div className="flex items-center justify-between px-3 mb-4">
                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Workspace</span>
@@ -366,7 +319,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               </button>
             ))}
           </div>
-
           <div className="p-4 border-t border-gray-800 space-y-1 bg-gray-950/50">
             {isAdmin && <Button onClick={onNavigateToAdmin} variant="ghost" className="w-full justify-start text-xs text-emerald-400 font-bold hover:bg-emerald-500/10"><ShieldCheck className="h-4 w-4 mr-2" /> Admin</Button>}
             <Button onClick={onNavigateToSettings} variant="ghost" className="w-full justify-start text-sm text-gray-400 font-bold hover:bg-gray-800 hover:text-white transition-colors"><Settings className="h-4 w-4 mr-2" /> Settings</Button>
@@ -400,17 +352,12 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         {showMembers && !activeRoom?.is_private && (
           <div className="bg-gray-900/90 border-b border-gray-800 p-4 animate-in slide-in-from-top duration-200">
             <div className="flex flex-wrap gap-3">
-              {members.length > 0 ? members.map(m => {
-                const isOnline = onlineUsers.includes(m.user_id);
-                return (
-                  <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800 shadow-sm">
-                    <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`} />
-                    <span className="text-[10px] font-bold text-gray-300">{m.display_name}</span>
-                  </div>
-                );
-              }) : (
-                <span className="text-[10px] text-gray-500 italic uppercase font-black tracking-widest">Sincronizzazione membri...</span>
-              )}
+              {members.length > 0 ? members.map(m => (
+                <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800 shadow-sm">
+                  <div className={`w-2 h-2 rounded-full ${onlineUsers.includes(m.user_id) ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`} />
+                  <span className="text-[10px] font-bold text-gray-300">{m.display_name}</span>
+                </div>
+              )) : <span className="text-[10px] text-gray-500 italic uppercase font-black tracking-widest">Sincronizzazione membri...</span>}
             </div>
           </div>
         )}
@@ -420,11 +367,24 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar pb-32"
           style={{ overflowAnchor: 'auto' }} 
         >
-          {messages.map((m) => {
+          {messages.map((m, index) => {
             const currentDate = new Date(m.created_at);
-            // Logica per i separatori di data (semplificata per il mapping continuo)
+            const previousDate = index > 0 ? new Date(messages[index - 1].created_at) : null;
+            const showDateSeparator = !previousDate || format(currentDate, 'yyyy-MM-dd') !== format(previousDate, 'yyyy-MM-dd');
+
+            let dateLabel = format(currentDate, 'd MMMM yyyy', { locale: it });
+            if (isToday(currentDate)) dateLabel = 'Oggi';
+            else if (isYesterday(currentDate)) dateLabel = 'Ieri';
+
             return (
               <div key={m.id} className="w-full">
+                {showDateSeparator && (
+                  <div className="flex items-center justify-center my-8 gap-4 px-4">
+                    <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-gray-800 to-gray-800" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-500 bg-gray-950 px-3 whitespace-nowrap">{dateLabel}</span>
+                    <div className="h-[1px] flex-1 bg-gradient-to-l from-transparent via-gray-800 to-gray-800" />
+                  </div>
+                )}
                 <ChatMessage message={m} isOwn={m.user_id === user?.id} isSelectionMode={isSelectionMode} isSelected={selectedMessageIds.includes(m.id)} onSelect={(id) => setSelectedMessageIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])} />
               </div>
             );
@@ -441,16 +401,13 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
                 ))}
               </div>
             )}
-
             <input type="file" className="hidden" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
-
             <div className="flex gap-1">
               <Button type="button" variant="ghost" size="icon" disabled={isUploading || isSelectionMode} onClick={() => fileInputRef.current?.click()} className="text-gray-400 hover:text-white">
                 {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" />}
               </Button>
               <Button type="button" variant="ghost" size="icon" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`text-gray-400 hover:text-white ${showEmojiPicker ? 'text-violet-400 bg-gray-900' : ''}`}><Smile className="h-5 w-5" /></Button>
             </div>
-
             <Textarea 
               value={newMessage} 
               onChange={(e) => setNewMessage(e.target.value)} 
