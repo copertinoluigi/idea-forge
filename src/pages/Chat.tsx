@@ -17,7 +17,6 @@ import type { Database } from '@/lib/database.types';
 
 type Message = Database['public']['Tables']['messages']['Row'] & { profiles: { display_name: string } | null };
 type Room = Database['public']['Tables']['rooms']['Row'];
-// Definizione estesa del membro per includere il profilo
 type Member = { 
   user_id: string; 
   user_email: string; 
@@ -105,24 +104,24 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     return () => { supabase.removeChannel(channel); };
   }, [activeRoomId]);
 
+  // FUNZIONE REVISIONATA CHIRURGICAMENTE
   const loadMembers = async (roomId: string) => {
-    // FIX: Query esplicita per recuperare il display_name dal join con profiles
-    const { data, error } = await supabase
-      .from('room_members')
-      .select(`
-        user_id,
-        user_email,
-        profiles:user_id (
-          display_name
-        )
-      `)
-      .eq('room_id', roomId);
-    
-    if (error) {
-      console.error("Error loading members:", error);
-      return;
+    console.log("Loading members for room:", roomId);
+    try {
+      const { data, error } = await supabase
+        .from('room_members')
+        .select('user_id, user_email, profiles(display_name)')
+        .eq('room_id', roomId);
+      
+      if (error) throw error;
+      
+      if (data) {
+        console.log("Members loaded:", data);
+        setMembers(data as any);
+      }
+    } catch (err) {
+      console.error("Error in loadMembers:", err);
     }
-    if (data) setMembers(data as any);
   };
 
   const loadRoomsAndSync = async () => {
@@ -255,7 +254,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               <button key={room.id} onClick={() => handleRoomSwitch(room.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all mb-1 ${activeRoomId === room.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40' : 'text-gray-400 hover:bg-gray-800'}`}>
                 {room.is_private ? <MessageSquare className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
                 <span className="truncate font-bold tracking-tight text-left">{room.name}</span>
-                {/* Indicatore attività globale (opzionale) */}
                 {onlineUsers.length > 1 && !room.is_private && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
               </button>
             ))}
@@ -291,22 +289,20 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </div>
         </header>
 
-        {/* FIX: Pannello Membri con indicatore Verde (Online) / Rosso (Offline) */}
         {showMembers && !activeRoom?.is_private && (
           <div className="bg-gray-900/90 border-b border-gray-800 p-4 animate-in slide-in-from-top duration-200">
             <div className="flex flex-wrap gap-3">
               {members.length > 0 ? members.map(m => {
                 const isOnline = onlineUsers.includes(m.user_id);
+                const name = m.profiles?.display_name || m.user_email.split('@')[0];
                 return (
                   <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800">
                     <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`} />
-                    <span className="text-[10px] font-bold text-gray-300">
-                      {(m.profiles as any)?.display_name || m.user_email}
-                    </span>
+                    <span className="text-[10px] font-bold text-gray-300">{name}</span>
                   </div>
                 );
               }) : (
-                <span className="text-[10px] text-gray-500 italic">Caricamento membri...</span>
+                <span className="text-[10px] text-gray-500 italic">Nessun membro trovato</span>
               )}
             </div>
           </div>
