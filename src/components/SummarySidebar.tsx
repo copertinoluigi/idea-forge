@@ -46,7 +46,15 @@ export function SummarySidebar({ isOpen, roomId, onClose, onGenerate, loading }:
           <History className="h-5 w-5 text-violet-400" />
           <h2 className="font-bold text-white uppercase text-xs tracking-widest">Snapshot Archive</h2>
         </div>
-        <Button size="icon" variant="ghost" onClick={onClose}><X className="h-4 w-4" /></Button>
+        {/* FIX: X di chiusura ora visibile e contrastata */}
+        <Button 
+          size="icon" 
+          variant="ghost" 
+          onClick={onClose} 
+          className="text-white hover:bg-gray-800 hover:text-white transition-colors"
+        >
+          <X className="h-5 w-5" />
+        </Button>
       </div>
 
       <ScrollArea className="flex-1 p-4">
