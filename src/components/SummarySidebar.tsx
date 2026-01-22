@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { X, Loader2, TrendingUp, History, FileText, CheckSquare, Square } from 'lucide-react';
+import { X, Loader2, TrendingUp, History, FileText, CheckSquare, Square, Zap } from 'lucide-react';
 
 interface Summary {
   id: string;
@@ -15,7 +15,7 @@ interface SummarySidebarProps {
   isOpen: boolean;
   roomId: string | null;
   onClose: () => void;
-  onGenerate: (selectedSummaryIds: string[]) => Promise<void>;
+  onGenerate: (selectedSummaryIds: string[], mode: 'snapshot' | 'simple') => Promise<void>;
   loading?: boolean;
 }
 
@@ -40,7 +40,6 @@ export function SummarySidebar({ isOpen, roomId, onClose, onGenerate, loading }:
   if (!isOpen) return null;
 
   return (
-    // Aggiunto pt e pb per gestire Notch e Home Bar su iOS
     <div className="fixed inset-y-0 right-0 w-full md:w-[400px] bg-gray-950 border-l border-gray-800 z-[60] flex flex-col shadow-2xl pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <div className="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-900/50">
         <div className="flex items-center gap-2">
@@ -57,14 +56,14 @@ export function SummarySidebar({ isOpen, roomId, onClose, onGenerate, loading }:
               ← Torna all'elenco
             </Button>
             <h3 className="text-lg font-bold text-white">{viewingSummary.title}</h3>
-            <div className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed bg-gray-900/80 p-4 rounded-xl border border-gray-800">
+            <div className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed bg-gray-900/80 p-4 rounded-xl border border-gray-800 prose prose-invert max-w-none">
               {viewingSummary.content}
             </div>
           </div>
         ) : (
           <div className="space-y-3 pb-10">
-            <p className="text-[10px] text-gray-500 uppercase font-bold mb-4">Seleziona riassunti da includere nel prossimo context:</p>
-            {summaries.map(s => (
+            <p className="text-[10px] text-gray-500 uppercase font-bold mb-4">Includi vecchi riassunti nel context?</p>
+            {summaries.length > 0 ? summaries.map(s => (
               <div key={s.id} className="group relative bg-gray-900/50 border border-gray-800 rounded-xl p-3 hover:border-violet-500/50 transition-all">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => setViewingSummary(s)}>
@@ -82,16 +81,29 @@ export function SummarySidebar({ isOpen, roomId, onClose, onGenerate, loading }:
                   </button>
                 </div>
               </div>
-            ))}
+            )) : (
+              <p className="text-[10px] text-gray-600 italic text-center py-4">Nessun riassunto precedente.</p>
+            )}
             
-            <Button 
-              className="w-full bg-violet-600 hover:bg-violet-500 mt-6 h-12 font-bold" 
-              disabled={loading}
-              onClick={() => onGenerate(selectedSummaries)}
-            >
-              {loading ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : <TrendingUp className="h-4 w-4 mr-2" />}
-              Genera Nuovo Layer
-            </Button>
+            <div className="grid grid-cols-1 gap-2 mt-6">
+              <Button 
+                className="w-full bg-violet-600 hover:bg-violet-500 h-12 font-bold uppercase text-[10px]" 
+                disabled={loading}
+                onClick={() => onGenerate(selectedSummaries, 'snapshot')}
+              >
+                {loading ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : <TrendingUp className="h-4 w-4 mr-2" />}
+                Genera Snapshot Asset
+              </Button>
+              <Button 
+                variant="outline"
+                className="w-full border-emerald-500/50 hover:bg-emerald-500/10 text-emerald-400 h-12 font-bold uppercase text-[10px]" 
+                disabled={loading}
+                onClick={() => onGenerate(selectedSummaries, 'simple')}
+              >
+                {loading ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : <Zap className="h-4 w-4 mr-2" />}
+                Riassunto Semplice (Quick)
+              </Button>
+            </div>
           </div>
         )}
       </ScrollArea>
