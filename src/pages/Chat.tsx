@@ -52,16 +52,17 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const [isUploading, setIsUploading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null); // Ref per lo scroll istantaneo
   
   const { user, profile, signOut, refreshProfile } = useAuth();
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomIdRef = useRef(activeRoomId);
-  const isFirstLoadRef = useRef(true); // Per gestire lo scroll istantaneo
 
   useEffect(() => { 
     activeRoomIdRef.current = activeRoomId;
-    isFirstLoadRef.current = true; // Resetta al cambio stanza
+    // Quando cambiamo stanza, resettiamo la vista dei membri
+    setShowMembers(false);
   }, [activeRoomId]);
 
   // Presence & Sync
@@ -104,12 +105,12 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         if (payload.new.room_id !== activeRoomIdRef.current) return;
         const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
         setMessages(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, { ...payload.new, profiles: p } as Message]));
-        // Scroll fluido solo per nuovi messaggi in arrivo
-        setTimeout(() => scrollToBottom(true), 50);
+        setTimeout(() => scrollToBottom(true), 100);
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [activeRoomId]);
 
+  // Fix caricamento membri con sintassi join esplicita
   const loadMembers = async (roomId: string) => {
     try {
       const { data, error } = await supabase
@@ -117,22 +118,36 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         .select(`
           user_id,
           user_email,
-          profiles:user_id ( display_name )
+          profiles!inner ( display_name )
         `)
         .eq('room_id', roomId);
       
-      if (error) throw error;
+      if (error) {
+        // Fallback: se il join fallisce, carichiamo almeno le email
+        const { data: fallbackData } = await supabase
+          .from('room_members')
+          .select('user_id, user_email')
+          .eq('room_id', roomId);
+        
+        if (fallbackData) {
+          setMembers(fallbackData.map(m => ({
+            user_id: m.user_id,
+            user_email: m.user_email,
+            display_name: m.user_email.split('@')[0]
+          })));
+        }
+        return;
+      }
       
       if (data) {
-        const formatted = data.map((m: any) => ({
+        setMembers(data.map((m: any) => ({
           user_id: m.user_id,
           user_email: m.user_email,
           display_name: m.profiles?.display_name || m.user_email.split('@')[0]
-        }));
-        setMembers(formatted);
+        })));
       }
     } catch (err) {
-      console.error("Error in loadMembers:", err);
+      console.error("Critical error loadMembers:", err);
     }
   };
 
@@ -165,11 +180,12 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     const { data } = await supabase.from('messages').select('*, profiles(display_name)').eq('room_id', id).order('created_at', { ascending: true });
     if (data) {
       setMessages(data as Message[]);
-      // Scroll istantaneo per il caricamento iniziale (rimuove l'effetto scivolamento)
-      setTimeout(() => {
-        scrollToBottom(false);
-        isFirstLoadRef.current = false;
-      }, 0);
+      // Scroll istantaneo: forziamo la posizione alla fine della lista senza animazione
+      requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+      });
     }
   };
 
@@ -318,19 +334,23 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               {members.length > 0 ? members.map(m => {
                 const isOnline = onlineUsers.includes(m.user_id);
                 return (
-                  <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800">
+                  <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800 shadow-sm">
                     <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`} />
                     <span className="text-[10px] font-bold text-gray-300">{m.display_name}</span>
                   </div>
                 );
               }) : (
-                <span className="text-[10px] text-gray-500 italic uppercase font-black tracking-widest">Nessun membro rilevato</span>
+                <span className="text-[10px] text-gray-500 italic uppercase font-black tracking-widest">Sincronizzazione membri...</span>
               )}
             </div>
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar pb-32">
+        {/* Scrollable Container Ref aggiunto qui */}
+        <div 
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar pb-32"
+        >
           {messages.map((m, index) => {
             const currentDate = new Date(m.created_at);
             const previousDate = index > 0 ? new Date(messages[index - 1].created_at) : null;
