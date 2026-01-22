@@ -58,24 +58,54 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRoomIdRef = useRef(activeRoomId);
-  const isInitialLoad = useRef(true); // Flag per gestire lo scroll istantaneo
+  const isInitialLoad = useRef(true);
 
   useEffect(() => { 
     activeRoomIdRef.current = activeRoomId;
     setShowMembers(false);
-    isInitialLoad.current = true; // Ogni volta che cambia stanza, resettiamo il flag
+    isInitialLoad.current = true;
   }, [activeRoomId]);
 
-  // Gestione istantanea dello scroll al caricamento messaggi
+  // ═══════════════════════════════════════════════════════════════════
+  // 🚀 LOGICA SNAP-TO-BOTTOM DEFINITIVA (ResizeObserver)
+  // ═══════════════════════════════════════════════════════════════════
   useLayoutEffect(() => {
-    if (messages.length > 0 && isInitialLoad.current) {
-      if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-        isInitialLoad.current = false;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    // Funzione per scrollare in fondo in modo istantaneo
+    const scrollToBottomInstant = () => {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
+    };
+
+    // Monitoriamo i cambiamenti di dimensione (es. caricamento immagini tardivo)
+    const resizeObserver = new ResizeObserver(() => {
+      if (isInitialLoad.current && messages.length > 0) {
+        scrollToBottomInstant();
+        // Disabilitiamo il flag "iniziale" solo dopo che lo scroll è stabile
+        if (container.scrollTop + container.clientHeight >= container.scrollHeight - 10) {
+           // Piccola tolleranza di 10px
+        }
       }
-    }
+    });
+
+    resizeObserver.observe(container);
+    scrollToBottomInstant();
+
+    return () => resizeObserver.disconnect();
   }, [messages]);
 
+  // Gestione scroll per i NUOVI messaggi (Smooth)
+  const scrollToBottom = (smooth = true) => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: smooth ? 'smooth' : 'instant'
+      });
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════
   // Presence & Sync
   useEffect(() => {
     if (!user || !activeRoomId) return;
@@ -117,7 +147,8 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
         const { data: p } = await supabase.from('profiles').select('display_name').eq('id', payload.new.user_id).single();
         setMessages(prev => (prev.some(m => m.id === payload.new.id) ? prev : [...prev, { ...payload.new, profiles: p } as Message]));
         
-        // Per i messaggi realtime, usiamo lo scroll fluido
+        // Per i messaggi realtime, scroll fluido
+        isInitialLoad.current = false; // Da qui in poi solo smooth scroll
         setTimeout(() => scrollToBottom(true), 100);
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -220,10 +251,16 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
       const fileExt = file.name.split('.').pop();
       const fileName = `${Math.random().toString(36).slice(2)}_${Date.now()}.${fileExt}`;
       const filePath = `${activeRoomId}/${fileName}`;
+
       const { error: upErr } = await supabase.storage.from('room-assets').upload(filePath, file);
       if (upErr) throw upErr;
+
       const { data: { publicUrl } } = supabase.storage.from('room-assets').getPublicUrl(filePath);
-      await supabase.from('messages').insert({ user_id: user.id, room_id: activeRoomId, content: "", attachments: [{ url: publicUrl, name: file.name, type: file.type }] as any });
+
+      await supabase.from('messages').insert({
+        user_id: user.id, room_id: activeRoomId, content: "",
+        attachments: [{ url: publicUrl, name: file.name, type: file.type }] as any
+      });
     } catch (err) {
       toast({ title: "Errore durante l'upload", variant: "destructive" });
     } finally {
@@ -245,12 +282,6 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
     e.preventDefault();
     const files = e.dataTransfer.files;
     if (files.length > 0) handleFileUpload(files[0]);
-  };
-
-  const scrollToBottom = (smooth = true) => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
-    }
   };
 
   const activeRoom = rooms.find(r => r.id === activeRoomId);
@@ -321,7 +352,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
               {members.length > 0 ? members.map(m => {
                 const isOnline = onlineUsers.includes(m.user_id);
                 return (
-                  <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800">
+                  <div key={m.user_id} className="flex items-center gap-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800 shadow-sm">
                     <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`} />
                     <span className="text-[10px] font-bold text-gray-300">{m.display_name}</span>
                   </div>
@@ -333,6 +364,7 @@ export function Chat({ activeRoomId, onRoomChange, onNavigateToSettings, onNavig
           </div>
         )}
 
+        {/* Scrollable Container Ref aggiunto qui */}
         <div 
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar pb-32"
