@@ -43,6 +43,7 @@ interface QueryFilter {
   column: string
   op: FilterOp
   value: any
+  negate?: boolean
 }
 
 interface MockResponse<T = any> {
@@ -145,6 +146,11 @@ class MockQueryBuilder {
     return this
   }
 
+  not(column: string, operator: string, value: any) {
+    this.filters.push({ column, op: operator as FilterOp, value, negate: true })
+    return this
+  }
+
   order(column: string, options?: { ascending?: boolean }) {
     this.orderColumn = column
     this.orderAsc = options?.ascending ?? true
@@ -237,11 +243,55 @@ class MockQueryBuilder {
     // SELECT
     let results = table.filter((row: any) => this.matchesFilters(row))
 
-    // Handle joins in select (e.g., "*, profiles(first_name, last_name)")
-    if (this.selectColumns.includes('profiles(') || this.selectColumns.includes('profiles!')) {
+    // Handle join patterns in select columns
+    // Supports: "profiles(fields)", "projects(fields)", "alias:foreignKey(fields)"
+    const selectStr = this.selectColumns
+
+    // Direct join: profiles(first_name, last_name) — uses user_id or profile_id FK
+    if (selectStr.includes('profiles(') && !selectStr.includes(':')) {
       results = results.map((row: any) => {
-        const profile = store.profiles?.find((p: any) => p.id === row.user_id)
+        const fkValue = row.user_id || row.profile_id
+        const profile = store.profiles?.find((p: any) => p.id === fkValue)
         return { ...row, profiles: profile ? { first_name: profile.first_name, last_name: profile.last_name, display_name: profile.display_name } : null }
+      })
+    }
+
+    // Direct join: projects(title) — uses project_id FK
+    if (selectStr.includes('projects(') && !selectStr.includes(':')) {
+      results = results.map((row: any) => {
+        const project = store.projects?.find((p: any) => p.id === row.project_id)
+        return { ...row, projects: project ? { id: project.id, title: project.title, status: project.status, budget: project.budget } : null }
+      })
+    }
+
+    // For project_members table: select('projects(*)')
+    if (selectStr === 'projects(*)') {
+      results = results.map((row: any) => {
+        const project = store.projects?.find((p: any) => p.id === row.project_id)
+        return { ...row, projects: project || null }
+      })
+    }
+
+    // Alias join: "alias:foreignKey(fields)" e.g. "owner:user_id(first_name,last_name,email)"
+    // Also handles "profiles:user_id(first_name, last_name)"
+    const aliasJoinRegex = /(\w+):(\w+)\(([^)]+)\)/g
+    let aliasMatch
+    while ((aliasMatch = aliasJoinRegex.exec(selectStr)) !== null) {
+      const [, alias, foreignKey, fields] = aliasMatch
+      const fieldNames = fields.split(',').map((f: string) => f.trim())
+      results = results.map((row: any) => {
+        // Try to find the related record based on foreign key
+        let related: any = null
+        if (foreignKey === 'user_id') {
+          related = store.profiles?.find((p: any) => p.id === row.user_id)
+        } else if (foreignKey === 'project_id') {
+          related = store.projects?.find((p: any) => p.id === row.project_id)
+        } else if (foreignKey === 'room_id') {
+          related = store.rooms?.find((r: any) => r.id === row.room_id)
+        }
+        if (!related) return { ...row, [alias]: null }
+        const filtered = Object.fromEntries(fieldNames.map((f: string) => [f, related[f]]))
+        return { ...row, [alias]: filtered }
       })
     }
 
@@ -282,21 +332,23 @@ class MockQueryBuilder {
   private matchesFilters(row: any): boolean {
     return this.filters.every(f => {
       const val = row[f.column]
+      let matches: boolean
       switch (f.op) {
-        case 'eq': return val === f.value
-        case 'neq': return val !== f.value
-        case 'gt': return val > f.value
-        case 'gte': return val >= f.value
-        case 'lt': return val < f.value
-        case 'lte': return val <= f.value
-        case 'is': return val === f.value
-        case 'in': return Array.isArray(f.value) && f.value.includes(val)
+        case 'eq': matches = val === f.value; break
+        case 'neq': matches = val !== f.value; break
+        case 'gt': matches = val > f.value; break
+        case 'gte': matches = val >= f.value; break
+        case 'lt': matches = val < f.value; break
+        case 'lte': matches = val <= f.value; break
+        case 'is': matches = val === f.value; break
+        case 'in': matches = Array.isArray(f.value) && f.value.includes(val); break
         case 'ilike': {
           const pattern = f.value.replace(/%/g, '.*').replace(/_/g, '.')
-          return new RegExp(pattern, 'i').test(val || '')
+          matches = new RegExp(pattern, 'i').test(val || ''); break
         }
-        default: return true
+        default: matches = true
       }
+      return f.negate ? !matches : matches
     })
   }
 }
